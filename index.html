@@ -41,6 +41,10 @@
     .stat { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:12px 14px; min-height:76px; }
     .stat b { display:block; font-size:24px; letter-spacing:-.03em; }
     .stat span { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+    .stat.wide { grid-column:span 2; }
+    .stat.subject-summary b { font-size:15px; line-height:1.35; letter-spacing:0; }
+    .subject-counts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+    .subject-count-pill { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; background:#fbfcfe; padding:4px 8px; font-size:12px; font-weight:750; color:#334155; }
     .viewer-title { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:18px 0 10px; }
     .viewer-title h2 { margin:0; font-size:24px; letter-spacing:-.03em; }
     .viewer-title .subtitle { color:var(--muted); font-size:13px; }
@@ -244,7 +248,7 @@
     </div>
     <div>
       <label>Card detail</label>
-      <label class="check-control" for="detailToggle"><input type="checkbox" id="detailToggle"> Detailed view</label>
+      <label class="check-control" for="detailToggle"><input type="checkbox" id="detailToggle" checked> Detailed view</label>
     </div>
     <div>
       <label>Actions</label>
@@ -356,6 +360,23 @@
             <li>Updated class view cards so the teacher name is visible without switching to teacher view.</li>
             <li>Added room numbers to cards where room data is present in the XML.</li>
             <li>Kept the existing timetable, Week A/B filtering, CSV export and manual XML loader behaviour.</li>
+          </ul>
+        </article>
+        <article class="release-card">
+          <h3>Monday 22 June changes</h3>
+          <ul class="change-list">
+            <li>Sarah removed from ToK to allow for POR.</li>
+            <li>Madeleine&rsquo;s ConnectEd allocation given to Melanie Reeve.</li>
+            <li>Madeleine&rsquo;s load reduced to 15 to allow for POR.</li>
+            <li>Monica takes Spanish in G6 so that Sharon Armstrong can take ConnectEd. No resolution yet for Lila&rsquo;s high load: she will need to either drop LCS or collapse DP French B.</li>
+            <li>Azniv removed from G8. Elize takes one G8 in exchange for a G9, and Francesca takes the other G8.</li>
+            <li>Suna is out of G7; David Barton picks up another G7 and is now at 15 Maths hours.</li>
+            <li>MVD preps reduced by removing MVD from G10. Anjel drops a G6, picked up by Selverani, and Anjel picks up MVD&rsquo;s G10.</li>
+            <li>Tariq drops a ConnectEd allocation for his LTL position; Sharon picks it up.</li>
+            <li>Rob picks up ToK.</li>
+            <li>James Gilmoor picks up ToK.</li>
+            <li>Rahul drops one G10 and picks up one DP.</li>
+            <li>Mohammed Saghir drops ConnectEd. His load is 15, allowing for POR.</li>
           </ul>
         </article>
       </div>
@@ -761,7 +782,7 @@ async function loadXmlFromFile(file) {
   setXmlStatus(`<strong>Loaded manually:</strong> ${esc(file.name)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
   return true;
 }
-const state = { view:'class', id:null, week:'all', detailed:false };
+const state = { view:'class', id:null, week:'all', detailed:true };
 const viewMode = document.getElementById('viewMode');
 const entitySelect = document.getElementById('entitySelect');
 const weekFilter = document.getElementById('weekFilter');
@@ -778,6 +799,7 @@ const allocationSort = document.getElementById('allocationSort');
 const teacherAllocationTable = document.getElementById('teacherAllocationTable');
 const allocationSummary = document.getElementById('allocationSummary');
 const downloadAllocationCsvButton = document.getElementById('downloadAllocationCsv');
+if (detailToggle) detailToggle.checked = state.detailed;
 
 const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
 tabButtons.forEach(btn => {
@@ -878,31 +900,108 @@ function renderTable() {
   html += '</tbody>';
   table.innerHTML = html;
 }
+function isDepartmentMeeting(ev) {
+  const haystack = [ev.subject, ev.subjectShort, ...ev.classes, ...ev.groups]
+    .map(v => String(v || '').toLowerCase()).join(' ');
+  return /\b(department|dept\.?|dep\.?)\s*(meeting|mtg)\b|\b(meeting|mtg)\s*(department|dept\.?|dep\.?)\b/.test(haystack);
+}
+function eventActiveInWeek(ev, week) {
+  if (week === 'A') return !ev.weeks || ev.weeks[0] === '1';
+  if (week === 'B') return !ev.weeks || ev.weeks[1] === '1';
+  return true;
+}
+function summaryEventWeight(ev) {
+  if (state.week !== 'all') return 1;
+  if (ev.weeks === '10' || ev.weeks === '01') return 0.5;
+  return 1;
+}
+function formatLessonCount(value) {
+  const rounded = Math.round(Number(value || 0) * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+function gradeFromText(value) {
+  const text = String(value || '').trim();
+  let match = text.match(/\bDP\s*([12])\b/i);
+  if (match) return `DP${match[1]}`;
+  if (/\b(CP|Careers?\s*Program(?:me)?)\b/i.test(text)) return 'CP';
+  match = text.match(/\b(?:Grade|Gr|Year|Yr|G)\s*(6|7|8|9|10|11|12)\b/i);
+  if (match) return `G${match[1]}`;
+  match = text.match(/(?:^|[^A-Za-z0-9])(6|7|8|9|10|11|12)[A-Z](?:\b|[^A-Za-z0-9])/i);
+  if (match) return `G${match[1]}`;
+  match = text.match(/(?:^|[^A-Za-z0-9])(6|7|8|9|10|11|12)(?:\b|[^A-Za-z0-9])/i);
+  if (match) return `G${match[1]}`;
+  return '';
+}
+function gradeForEvent(ev) {
+  for (const value of [...ev.classes, ...ev.groups]) {
+    const grade = gradeFromText(value);
+    if (grade) return grade;
+  }
+  return '';
+}
+function cleanSubjectForSummary(value) {
+  const original = textClean(value || 'Lesson');
+  const cleaned = original
+    .replace(/^\s*(?:Grade|Gr|Year|Yr|G)\s*(?:6|7|8|9|10|11|12)\s*[-:–—]?\s*/i, '')
+    .replace(/^\s*DP\s*[12]\s*[-:–—]?\s*/i, '')
+    .replace(/^\s*CP\s*[-:–—]?\s*/i, '')
+    .trim();
+  return cleaned || original;
+}
+function subjectCountLabel(ev) {
+  const grade = gradeForEvent(ev);
+  const subject = cleanSubjectForSummary(ev.subject || ev.subjectShort || 'Lesson');
+  return grade ? `${grade} ${subject}` : subject;
+}
+function subjectCountsForSummary(events) {
+  const counts = new Map();
+  for (const ev of events) {
+    if (isDepartmentMeeting(ev)) continue;
+    const label = subjectCountLabel(ev);
+    counts.set(label, (counts.get(label) || 0) + summaryEventWeight(ev));
+  }
+  return Array.from(counts.entries())
+    .sort((a,b) => (b[1] - a[1]) || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+}
+function statHtml(label, value, detail='', className='') {
+  return `<div class="stat ${esc(className)}"><b>${esc(value)}</b><span>${esc(label)}</span>${detail ? `<span>${esc(detail)}</span>` : ''}</div>`;
+}
 function renderSummary() {
   const opt = selectedOption();
   const events = filteredEvents();
-  const uniqueLessons = new Set(events.map(e => e.lessonId));
-  const weekA = events.filter(e => e.weeks && e.weeks[0] === '1').length;
-  const weekB = events.filter(e => e.weeks && e.weeks[1] === '1').length;
+  const allViewEvents = DATA.events.filter(ev => matchesView(ev));
+  const nonDeptVisible = events.filter(ev => !isDepartmentMeeting(ev));
+  const nonDeptAllViewEvents = allViewEvents.filter(ev => !isDepartmentMeeting(ev));
+  const weekA = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'A')).length;
+  const weekB = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'B')).length;
+  const lessonCount = state.week === 'all'
+    ? nonDeptAllViewEvents.reduce((total, ev) => total + summaryEventWeight(ev), 0)
+    : nonDeptVisible.length;
   const rooms = new Set(events.flatMap(e => e.rooms).filter(Boolean));
   const teachers = new Set(events.flatMap(e => e.teachers).filter(Boolean));
   const classes = new Set(events.flatMap(e => e.classes).filter(Boolean));
   const contract = opt?.contractCount;
   const weekLabel = state.week === 'all' ? 'all weeks' : `Week ${state.week}`;
+  const subjectCounts = subjectCountsForSummary(events);
+  const subjectText = subjectCounts.length
+    ? subjectCounts.map(([k,v]) => `${k} (${formatLessonCount(v)})`).join(', ')
+    : 'No non-department lessons';
+
   activeTitle.textContent = `${state.view[0].toUpperCase() + state.view.slice(1)}: ${opt?.name || '—'}`;
-  activeSubtitle.textContent = `${events.length} scheduled card${events.length === 1 ? '' : 's'} shown for ${weekLabel}.`;
+  activeSubtitle.textContent = `${formatLessonCount(lessonCount)} lesson${Number(lessonCount) === 1 ? '' : 's'} counted for ${weekLabel}; department meetings excluded.`;
   sourceNote.textContent = `${DATA.meta.sourceXml} · ${DATA.meta.sourceWorkbook}`;
+
+  const entityLabel = state.view === 'teacher' ? 'Classes taught' : state.view === 'class' ? 'Teachers' : 'Teachers';
+  const entityCount = state.view === 'class' ? teachers.size : state.view === 'teacher' ? classes.size : teachers.size;
   const stats = [
-    ['Cards shown', events.length, 'Scheduled cards in current view'],
-    ['Unique lessons', uniqueLessons.size, 'Distinct aSc lesson IDs'],
-    ['Week A / B', `${weekA} / ${weekB}`, 'Cards active in each week'],
-    [state.view === 'teacher' ? 'Classes taught' : state.view === 'class' ? 'Teachers' : 'Teachers', state.view === 'class' ? teachers.size : state.view === 'teacher' ? classes.size : teachers.size, 'Unique linked entities'],
-    ['Load count', contract ?? '—', 'Estimated average weekly periods from XML']
+    statHtml('Number of lessons', formatLessonCount(lessonCount), 'Department meetings excluded'),
+    `<div class="stat wide subject-summary"><b>${esc(subjectText)}</b><span>Subjects taught</span><span>Counts exclude department meetings</span></div>`,
+    statHtml('Week A / B lessons', `${weekA} / ${weekB}`, 'Non-department lessons active each week'),
+    statHtml(entityLabel, entityCount, 'Unique linked entities'),
+    statHtml('Load count', contract ?? '—', 'Estimated average weekly periods from XML')
   ];
-  summary.innerHTML = stats.map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
-  const subjectCounts = Object.entries(events.reduce((acc,e) => { acc[e.subject] = (acc[e.subject] || 0) + 1; return acc; }, {}))
-    .sort((a,b)=>b[1]-a[1]).slice(0,10);
-  footerNote.innerHTML = subjectCounts.length ? 'Current view subject distribution: ' + subjectCounts.map(([k,v]) => `<span class="chip">${esc(k)}: ${v}</span>`).join(' ') : '';
+  summary.innerHTML = stats.join('');
+  footerNote.innerHTML = '';
 }
 function render() { renderSummary(); renderTable(); }
 function csvEscape(v) {
