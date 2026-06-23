@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KCC Timetable Viewer 2026-2027</title>
+  <style>
+    :root {
+      --kcc-green:#1EA270;
+      --kcc-red:#F04E4F;
+      --ink:#14213d;
+      --muted:#5e6b7a;
+      --line:#d8dee8;
+      --bg:#f6f8fb;
+      --panel:#ffffff;
+      --soft:#edf4f1;
+      --warning:#fff7e6;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+    header { padding:22px clamp(16px, 3vw, 36px); background:linear-gradient(135deg,#0f513f 0%, var(--kcc-green) 64%, #34b98a 100%); color:white; }
+    header h1 { margin:0 0 6px; font-size:clamp(24px, 4vw, 38px); letter-spacing:-.04em; }
+    header p { margin:0; opacity:.92; max-width:1100px; }
+    .header-shell { display:flex; align-items:center; gap:20px; max-width:1280px; margin:0 auto; }
+    .logo-card { flex:0 0 auto; width:min(260px, 34vw); background:white; border-radius:18px; padding:12px 14px; box-shadow:0 14px 34px rgba(0,0,0,.16); }
+    .kcc-logo { display:block; width:100%; height:auto; object-fit:contain; }
+    .header-copy { min-width:0; }
+    .release-chip { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,.36); background:rgba(255,255,255,.16); border-radius:999px; padding:5px 10px; font-size:12px; font-weight:850; letter-spacing:.04em; text-transform:uppercase; margin-bottom:10px; }
+    main { padding:18px clamp(12px, 3vw, 36px) 42px; }
+    .toolbar { display:grid; grid-template-columns: 1.05fr 1.75fr .75fr .85fr 1.1fr; gap:12px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 30px rgba(15,35,55,.06); position:sticky; top:0; z-index:20; }
+    label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; margin:0 0 6px; }
+    .check-control { min-height:42px; display:flex; align-items:center; gap:9px; padding:0 12px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); font-size:13px; text-transform:none; letter-spacing:0; margin:0; cursor:pointer; }
+    .check-control input { width:16px; height:16px; accent-color:var(--kcc-green); }
+    select, input[type="search"] { width:100%; height:42px; border:1px solid var(--line); border-radius:12px; background:white; color:var(--ink); font-size:14px; padding:0 12px; outline:none; }
+    select:focus, input:focus { border-color:var(--kcc-green); box-shadow:0 0 0 3px rgba(30,162,112,.14); }
+    .button-row { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    button { height:42px; border:1px solid var(--line); border-radius:12px; background:white; color:var(--ink); font-weight:700; padding:0 12px; cursor:pointer; }
+    button.primary { background:var(--ink); color:white; border-color:var(--ink); }
+    button:hover { transform:translateY(-1px); box-shadow:0 6px 15px rgba(20,33,61,.08); }
+    .summary { margin:14px 0; display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:10px; }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:12px 14px; min-height:76px; }
+    .stat b { display:block; font-size:24px; letter-spacing:-.03em; }
+    .stat span { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+    .stat.wide { grid-column:span 2; }
+    .stat.subject-summary b { font-size:15px; line-height:1.35; letter-spacing:0; }
+    .subject-counts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+    .subject-count-pill { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; background:#fbfcfe; padding:4px 8px; font-size:12px; font-weight:750; color:#334155; }
+    .viewer-title { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:18px 0 10px; }
+    .viewer-title h2 { margin:0; font-size:24px; letter-spacing:-.03em; }
+    .viewer-title .subtitle { color:var(--muted); font-size:13px; }
+    .table-wrap { overflow:auto; max-height:calc(100vh - 190px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
+    table { width:100%; border-collapse:separate; border-spacing:0; min-width:980px; table-layout:fixed; }
+    th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); vertical-align:top; }
+    thead th { position:sticky; top:0; z-index:12; background:#f9fbfd; padding:10px; text-align:left; font-size:13px; box-shadow:0 1px 0 var(--line); }
+    tbody th { background:#fbfcfe; width:118px; padding:10px; text-align:left; font-size:13px; position:sticky; left:0; z-index:8; }
+    tbody th .period { font-size:18px; font-weight:800; }
+    tbody th .time { color:var(--muted); font-size:12px; margin-top:2px; }
+    td { height:112px; width:18%; padding:6px; background:white; }
+    tr:last-child th, tr:last-child td { border-bottom:0; }
+    th:last-child, td:last-child { border-right:0; }
+    .cell-empty { color:#a5afbc; font-size:12px; padding:4px; }
+    .card { --h:170; position:relative; border:1px solid hsl(var(--h), 42%, 79%); border-left:4px solid hsl(var(--h), 55%, 45%); background:linear-gradient(180deg, hsl(var(--h), 70%, 97%), #fff); border-radius:10px; padding:6px 8px; margin:0 0 5px; box-shadow:0 3px 9px rgba(20,33,61,.06); }
+    .card .topline { display:flex; gap:8px; justify-content:space-between; align-items:start; }
+    .subject { font-weight:850; font-size:13px; line-height:1.15; overflow-wrap:anywhere; }
+    .badge { flex:0 0 auto; display:inline-flex; align-items:center; border-radius:999px; padding:2px 7px; font-size:10px; font-weight:800; background:#eef2f6; color:#435060; }
+    .badge.a { background:#e9f7f0; color:#0d6848; }
+    .badge.b { background:#fff1f1; color:#a83232; }
+    .meta { margin-top:5px; font-size:12px; color:#344054; line-height:1.3; }
+    .meta strong { color:#1a2738; }
+    .card.compact { padding:5px 7px; margin-bottom:4px; border-left-width:4px; box-shadow:none; }
+    .card.compact .topline { display:block; }
+    .card.compact .subject { font-size:12px; line-height:1.12; }
+    .card.compact .meta { margin-top:3px; font-size:11px; line-height:1.18; }
+    .card.compact .badge { display:none; }
+    .tiny { color:var(--muted); font-size:11px; }
+    .chips { margin:10px 0 0; display:flex; gap:6px; flex-wrap:wrap; }
+    .chip { border:1px solid var(--line); border-radius:999px; padding:4px 8px; font-size:12px; background:#fff; color:#3b4656; }
+    .notice { margin:14px 0 0; border:1px solid #f3d7a3; background:var(--warning); color:#5f4208; padding:10px 12px; border-radius:14px; font-size:13px; }
+    .footer-note { color:var(--muted); font-size:12px; margin-top:12px; }
+    .hidden { display:none !important; }
+
+    .xml-source { margin:12px 0 0; display:grid; grid-template-columns: .8fr 1.15fr auto auto 1.6fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:12px 14px; box-shadow:0 10px 30px rgba(15,35,55,.04); }
+    input[type="file"] { width:100%; min-height:42px; border:1px dashed var(--line); border-radius:12px; background:#fff; color:var(--ink); font-size:13px; padding:9px 12px; }
+    .status-line { min-height:42px; display:flex; align-items:center; color:var(--muted); font-size:13px; line-height:1.35; }
+    .status-line strong { color:var(--ink); }
+
+    .tab-nav { display:flex; gap:10px; align-items:center; margin:0 0 14px; flex-wrap:wrap; }
+    .tab-btn { height:42px; border:1px solid var(--line); border-radius:999px; background:white; color:var(--ink); font-weight:800; padding:0 16px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+    .tab-btn[aria-selected="true"] { background:var(--ink); color:#fff; border-color:var(--ink); box-shadow:0 8px 20px rgba(20,33,61,.12); }
+    .page-section { display:none; }
+    .page-section.active { display:block; }
+    .keypoints-panel { background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:clamp(16px, 3vw, 28px); box-shadow:0 10px 30px rgba(15,35,55,.06); }
+    .keypoints-hero { display:grid; grid-template-columns:1.15fr .85fr; gap:18px; align-items:stretch; margin-bottom:18px; }
+    .keypoints-hero .intro, .keypoints-hero .status { border:1px solid var(--line); border-radius:18px; padding:18px; background:#fff; }
+    .keypoints-hero h2 { margin:0 0 8px; font-size:clamp(24px, 4vw, 36px); letter-spacing:-.04em; }
+    .keypoints-hero p { margin:0; color:#3b4656; line-height:1.55; }
+    .status-grid { display:grid; gap:9px; margin-top:12px; }
+    .status-item { display:flex; gap:10px; align-items:flex-start; border:1px solid #e7edf3; border-radius:12px; padding:10px; background:#fbfcfe; }
+    .status-item b { display:block; font-size:13px; }
+    .status-item span { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+    .keypoint-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+    .keypoint-card { border:1px solid var(--line); border-radius:18px; padding:16px; background:#fff; }
+    .keypoint-card h3 { margin:0 0 10px; font-size:18px; letter-spacing:-.02em; }
+    .keypoint-card ul { margin:0; padding-left:20px; }
+    .keypoint-card li { margin:7px 0; line-height:1.45; color:#2f3b4a; }
+    .keypoint-card.warning { background:var(--warning); border-color:#f3d7a3; }
+    .keypoint-card.full { grid-column:1 / -1; }
+    .keypoint-card .note { margin-top:10px; color:var(--muted); font-size:13px; line-height:1.45; }
+    .pill-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .pill { display:inline-flex; align-items:center; border-radius:999px; border:1px solid var(--line); background:#fbfcfe; padding:6px 10px; font-size:12px; font-weight:800; color:#334155; }
+
+    .keypoint-card.with-demo { display:grid; grid-template-columns:minmax(280px, .9fr) minmax(360px, 1.1fr); gap:16px; align-items:start; }
+    .keypoint-content h3 { margin-top:0; }
+    .visual-demo { border:1px solid #dfe7ef; border-radius:16px; background:linear-gradient(180deg,#fbfcfe,#f6f9fc); padding:14px; min-height:180px; overflow:hidden; }
+    .demo-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .demo-title { font-weight:850; letter-spacing:-.02em; font-size:15px; }
+    .demo-subtitle { color:var(--muted); font-size:12px; line-height:1.4; margin-top:3px; }
+    .demo-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+    .demo-actions button, .demo-action { height:32px; border-radius:999px; font-size:12px; padding:0 10px; background:white; }
+    .demo-actions button.primary-mini { background:var(--ink); color:white; border-color:var(--ink); }
+    .metric-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin:8px 0 10px; }
+    .metric { border:1px solid #e3e9f0; border-radius:13px; background:white; padding:10px; }
+    .metric b { display:block; font-size:22px; letter-spacing:-.03em; }
+    .metric span { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+    .mini-table { width:100%; border-collapse:separate; border-spacing:0; min-width:0; font-size:12px; overflow:hidden; border:1px solid #e3e9f0; border-radius:13px; background:white; }
+    .mini-table th, .mini-table td { border-right:1px solid #e3e9f0; border-bottom:1px solid #e3e9f0; padding:8px; text-align:left; vertical-align:top; }
+    .mini-table th { background:#f9fbfd; color:#334155; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .mini-table tr:last-child td { border-bottom:0; }
+    .mini-table th:last-child, .mini-table td:last-child { border-right:0; }
+    .mini-table .slot { font-weight:800; color:#14213d; white-space:nowrap; }
+    .inline-chips { display:flex; flex-wrap:wrap; gap:5px; }
+    .mini-chip { display:inline-flex; align-items:center; border:1px solid #dfe7ef; border-radius:999px; background:#fff; padding:3px 7px; font-size:11px; font-weight:750; color:#334155; }
+    .mini-chip.green { border-color:#bde7d5; background:#eefaf5; color:#0d6848; }
+    .mini-chip.red { border-color:#ffd2d2; background:#fff4f4; color:#9f2f2f; }
+    .mini-chip.blue { border-color:#cfe0ff; background:#f2f6ff; color:#224a91; }
+    .mini-chip.amber { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
+    .demo-flow { display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center; margin:8px 0 10px; }
+    .flow-box { border:1px solid #dfe7ef; border-radius:14px; background:white; padding:10px; min-height:72px; }
+    .flow-box b { display:block; font-size:14px; }
+    .flow-box span { display:block; color:var(--muted); font-size:12px; margin-top:3px; line-height:1.35; }
+    .flow-arrow { font-weight:900; color:var(--muted); }
+    .bar-list { display:grid; gap:7px; margin-top:8px; }
+    .bar-row { display:grid; grid-template-columns:minmax(120px, 1.1fr) 2fr 42px; gap:8px; align-items:center; font-size:12px; }
+    .bar-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bar-track { height:10px; border-radius:999px; background:#e8eef5; overflow:hidden; }
+    .bar-fill { height:100%; width:var(--w); background:linear-gradient(90deg,var(--kcc-green),#6bd3ad); border-radius:999px; }
+    .demo-note { margin-top:9px; color:var(--muted); font-size:12px; line-height:1.45; }
+    .status-checks { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:8px; }
+    .status-check { border:1px solid #e3e9f0; background:white; border-radius:13px; padding:10px; }
+    .status-check b { display:block; font-size:13px; }
+    .status-check span { display:block; margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; }
+    .snapshot-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px; }
+    .snapshot-box { border:1px solid #e3e9f0; background:white; border-radius:13px; padding:10px; }
+    .snapshot-box h4 { margin:0 0 8px; font-size:13px; }
+    .section-label { margin:10px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:850; }
+
+    .release-panel, .allocation-panel { background:var(--panel); border:1px solid var(--line); border-radius:22px; padding:clamp(16px, 3vw, 28px); box-shadow:0 10px 30px rgba(15,35,55,.06); }
+    .release-grid { display:grid; grid-template-columns:minmax(0, .95fr) minmax(0, 1.05fr); gap:16px; align-items:start; }
+    .release-card { border:1px solid var(--line); border-radius:18px; padding:16px; background:#fff; }
+    .release-card h2, .release-card h3, .allocation-panel h2 { margin:0 0 8px; letter-spacing:-.03em; }
+    .release-card p, .allocation-panel p { color:#3b4656; line-height:1.5; margin:0; }
+    .change-list { display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; }
+    .change-list li { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border:1px solid #e5ecf3; border-radius:14px; padding:11px 12px; background:#fbfcfe; color:#2f3b4a; line-height:1.42; }
+    .change-list li::before { content:'✓'; display:inline-grid; place-items:center; width:22px; height:22px; border-radius:999px; background:#e9f7f0; color:#0d6848; font-weight:900; }
+    .allocation-header { display:grid; grid-template-columns:1fr minmax(220px,.55fr) minmax(180px,.35fr) auto; gap:12px; align-items:end; margin:14px 0; }
+    .allocation-toolbar-note { color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px; }
+    .allocation-wrap { max-height:calc(100vh - 230px); }
+    .allocation-table { min-width:1180px; table-layout:auto; }
+    .allocation-table th, .allocation-table td { padding:10px; vertical-align:top; }
+    .allocation-table thead th { white-space:nowrap; }
+    .allocation-table tbody th { position:static; width:auto; background:#fff; font-size:13px; }
+    .allocation-teacher { min-width:210px; font-weight:850; color:#14213d; }
+    .allocation-hours { font-size:22px; font-weight:900; letter-spacing:-.03em; white-space:nowrap; }
+    .alloc-stack { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
+    .alloc-pill { display:inline-flex; align-items:flex-start; border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:5px 8px; font-size:12px; line-height:1.25; color:#334155; max-width:100%; }
+    .alloc-pill strong { margin-right:4px; color:#14213d; }
+    .alloc-muted { color:var(--muted); font-size:12px; line-height:1.35; }
+    .allocation-empty { padding:20px; color:var(--muted); }
+    @media (max-width: 900px) {
+      .toolbar, .xml-source { grid-template-columns:1fr; position:relative; }
+      .header-shell, .release-grid, .allocation-header { grid-template-columns:1fr; display:grid; }
+      .logo-card { width:min(320px, 90vw); }
+      .button-row { justify-content:flex-start; }
+      .summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+      .keypoints-hero, .keypoint-grid { grid-template-columns:1fr; }
+      .keypoint-card.with-demo { grid-template-columns:1fr; }
+      .metric-grid, .status-checks, .snapshot-pair { grid-template-columns:1fr; }
+      .demo-flow { grid-template-columns:1fr; }
+      .flow-arrow { transform:rotate(90deg); justify-self:center; }
+      .keypoint-card.full { grid-column:auto; }
+      thead th { top:0; }
+    }
+    @media print {
+      body { background:white; }
+      header, .tab-nav, .toolbar, .summary, .notice, .footer-note { display:none !important; }
+      main { padding:0; }
+      .table-wrap { border:0; box-shadow:none; overflow:visible; }
+      table { min-width:0; font-size:10px; }
+      td { height:auto; padding:4px; }
+      .card { box-shadow:none; break-inside:avoid; }
+      thead th, tbody th { position:static; }
+      .viewer-title { margin:0 0 8px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="header-shell">
+    <div class="logo-card" aria-label="Raha International School Khalifa City Campus logo">
+      <img class="kcc-logo" src="data:image/webp;base64,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" alt="Raha International School Khalifa City Campus">
+    </div>
+    <div class="header-copy">
+      <div class="release-chip" id="releaseChip">2026–2027 · multi-phase XML viewer</div>
+      <h1 id="pageTitle">KCC Timetable Viewer 2026-2027</h1>
+      <p id="pageIntro">GitHub-ready viewer hydrated directly from external aSc XML exports. Switch between Secondary and Primary XML sources, or load an XML file manually. Student records are ignored by the viewer.</p>
+    </div>
+  </div>
+</header>
+<main>
+  <nav class="tab-nav" aria-label="Viewer sections">
+    <button class="tab-btn" data-section="timetableSection" aria-selected="true">Timetable viewer</button>
+    <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
+    <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
+    <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
+    <a class="tab-btn" href="https://notyourleader.github.io/CareersProgrammeOptions/" target="_blank" rel="noopener">CP options</a>
+  </nav>
+
+  <section id="timetableSection" class="page-section active" aria-label="Timetable viewer">
+  <section class="toolbar" aria-label="Timetable controls">
+    <div>
+      <label for="viewMode">View by</label>
+      <select id="viewMode">
+        <option value="class">Class</option>
+        <option value="teacher">Teacher</option>
+        <option value="subject">Subject</option>
+      </select>
+    </div>
+    <div>
+      <label for="entitySelect">Select</label>
+      <select id="entitySelect"></select>
+    </div>
+    <div>
+      <label for="weekFilter">Week</label>
+      <select id="weekFilter">
+        <option value="all">All</option>
+        <option value="A">Week A</option>
+        <option value="B">Week B</option>
+      </select>
+    </div>
+    <div>
+      <label>Card detail</label>
+      <label class="check-control" for="detailToggle"><input type="checkbox" id="detailToggle" checked> Detailed view</label>
+    </div>
+    <div>
+      <label>Actions</label>
+      <div class="button-row">
+        <button id="downloadCsv">CSV</button>
+        <button id="copySummary">Copy summary</button>
+        <button class="primary" onclick="window.print()">Print</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="xml-source" aria-label="XML data source">
+    <div>
+      <label for="sourceProfile">Timetable source</label>
+      <select id="sourceProfile">
+        <option value="secondary">Secondary XML</option>
+        <option value="primary">Primary XML</option>
+      </select>
+    </div>
+    <div>
+      <label for="xmlFile">Manual XML load for selected source</label>
+      <input type="file" id="xmlFile" accept=".xml,text/xml,application/xml">
+    </div>
+    <div>
+      <label>Default source</label>
+      <button id="reloadXml" type="button">Reload selected XML</button>
+    </div>
+    <div>
+      <label>Expected file</label>
+      <button id="copyXmlName" type="button">Copy filename</button>
+    </div>
+    <div class="status-line" id="xmlStatus">Loading XML…</div>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="viewer-title">
+    <div>
+      <h2 id="activeTitle">Timetable</h2>
+      <div class="subtitle" id="activeSubtitle"></div>
+    </div>
+    <div class="subtitle" id="sourceNote"></div>
+  </section>
+
+  <section class="table-wrap">
+    <table id="ttTable" aria-label="Timetable grid"></table>
+  </section>
+
+  <div class="notice">
+    Notes: This viewer loads a selected timetable from an external aSc XML file. On GitHub Pages, keep this HTML file beside the XML files named in the source selector. Replace the relevant XML whenever the timetable changes. Simple cards show subject, unique group/class labels, teacher names and rooms where available; tick Detailed view to add fuller metadata and week labels. Student records in the XML are ignored.
+  </div>
+  <div class="footer-note" id="footerNote"></div>
+
+  </section>
+
+  <section id="teacherAllocationSection" class="page-section" aria-label="Teacher allocations">
+    <div class="allocation-panel">
+      <h2>Teacher allocation overview</h2>
+      <p>Use this report to see each teacher’s estimated weekly allocation without manually counting timetable cards. Week A-only and Week B-only lessons count as 0.5 hours each in the average weekly total.</p>
+      <div class="allocation-header">
+        <div>
+          <label for="allocationSearch">Search teacher, subject, grade or room</label>
+          <input type="search" id="allocationSearch" placeholder="Type to filter allocations…">
+        </div>
+        <div>
+          <label for="allocationLoadFilter">Load band</label>
+          <select id="allocationLoadFilter">
+            <option value="all">All loads</option>
+            <option value="light">≤ 16 hours</option>
+            <option value="standard">17–24 hours</option>
+            <option value="heavy">25+ hours</option>
+          </select>
+        </div>
+        <div>
+          <label for="allocationSort">Sort by</label>
+          <select id="allocationSort">
+            <option value="teacher">Teacher A–Z</option>
+            <option value="hours-desc">Hours high–low</option>
+            <option value="hours-asc">Hours low–high</option>
+          </select>
+        </div>
+        <div>
+          <label>Actions</label>
+          <button id="downloadAllocationCsv" type="button">Allocation CSV</button>
+        </div>
+      </div>
+      <div class="allocation-toolbar-note">Subject and grade-level totals are derived from scheduled XML cards. Multi-class cards are counted once for teacher total time and proportionally split across grade/section breakdowns.</div>
+      <section class="summary allocation-summary" id="allocationSummary"></section>
+      <section class="table-wrap allocation-wrap">
+        <table id="teacherAllocationTable" class="allocation-table" aria-label="Teacher allocation summary"></table>
+      </section>
+    </div>
+  </section>
+
+  <section id="changelogSection" class="page-section" data-secondary-only="true" aria-label="V3 changelog">
+    <div class="release-panel">
+      <div class="release-grid">
+        <article class="release-card">
+          <h2>Secondary Timetable 2026-2027 V3</h2>
+          <p>This release focuses on making the timetable clearer for staff: cleaner cards, visible teachers and rooms, a KCC-branded page header, and an all-teacher allocation report.</p>
+          <div class="pill-row">
+            <span class="pill">KCC branding</span>
+            <span class="pill">Teacher allocation report</span>
+            <span class="pill">Cleaner group labels</span>
+            <span class="pill">Class-view teacher names</span>
+            <span class="pill">Room visibility</span>
+          </div>
+        </article>
+        <article class="release-card">
+          <h3>Addressed in this release</h3>
+          <ul class="change-list">
+            <li>Renamed the page and browser title to <strong>Secondary Timetable 2026-2027 V3</strong>.</li>
+            <li>Added the Raha International School Khalifa City Campus logo to the page header.</li>
+            <li>Added a teacher allocation tab showing total hours, subject hours, grade-level/section hours and rooms.</li>
+            <li>Cleaned repeated group labels so cards show unique group names only.</li>
+            <li>Updated class view cards so the teacher name is visible without switching to teacher view.</li>
+            <li>Added room numbers to cards where room data is present in the XML.</li>
+            <li>Kept the existing timetable, Week A/B filtering, CSV export and manual XML loader behaviour.</li>
+          </ul>
+        </article>
+        <article class="release-card">
+          <h3>Monday 22 June changes</h3>
+          <ul class="change-list">
+            <li>Sarah removed from ToK to allow for POR.</li>
+            <li>Madeleine&rsquo;s ConnectEd allocation given to Melanie Reeve.</li>
+            <li>Madeleine&rsquo;s load reduced to 15 to allow for POR.</li>
+            <li>Monica takes Spanish in G6 so that Sharon Armstrong can take ConnectEd. No resolution yet for Lila&rsquo;s high load: she will need to either drop LCS or collapse DP French B.</li>
+            <li>Azniv removed from G8. Elize takes one G8 in exchange for a G9, and Francesca takes the other G8.</li>
+            <li>Suna is out of G7; David Barton picks up another G7 and is now at 15 Maths hours.</li>
+            <li>MVD preps reduced by removing MVD from G10. Anjel drops a G6, picked up by Selverani, and Anjel picks up MVD&rsquo;s G10.</li>
+            <li>Tariq drops a ConnectEd allocation for his LTL position; Sharon picks it up.</li>
+            <li>Rob picks up ToK.</li>
+            <li>James Gilmoor picks up ToK.</li>
+            <li>Rahul drops one G10 and picks up one DP.</li>
+            <li>Mohammed Saghir drops ConnectEd. His load is 15, allowing for POR.</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="keypointsSection" class="page-section" data-secondary-only="true" aria-label="Key points and assumptions">
+    <div class="keypoints-panel">
+      <div class="keypoints-hero">
+        <div class="intro">
+          <h2>Secondary V3 with CP: key points, evidence and assumptions</h2>
+          <p>This section summarises the main planning decisions, constraints and outstanding items behind the Secondary V3 timetable. Each key-point group includes a visual evidence block: either a live timetable snapshot drawn from the embedded data, or a clearly labelled planning diagram where the decision is not directly encoded in aSc.</p>
+          <div class="pill-row">
+            <span class="pill">Maths streaming</span>
+            <span class="pill">DP timetable block changes</span>
+            <span class="pill">POR-aware allocation</span>
+            <span class="pill">MYP single-period PHE</span>
+            <span class="pill">CP, ToK and department meeting checks</span>
+          </div>
+        </div>
+        <div class="status">
+          <p><strong>Current build status</strong></p>
+          <div class="status-grid">
+            <div class="status-item"><div><b>Embedded build</b><span>No upload box; the timetable data is hardcoded into this file.</span></div></div>
+            <div class="status-item"><div><b>Views available</b><span>Class, teacher and subject views, with Week A / Week B filtering.</span></div></div>
+            <div class="status-item"><div><b>Evidence blocks</b><span>Buttons in each visual block open the related class, teacher or subject view in the timetable tab.</span></div></div>
+            <div class="status-item"><div><b>Known exclusions</b><span>CP/Careers Programme is included; ToK teacher allocation and remaining department meetings may still be provisional.</span></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="keypoint-grid">
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>Maths structure</h3>
+            <ul>
+              <li>Grade 6 Maths has been blocked with three classes running concurrently, allowing for two extended classes and four standard classes.</li>
+              <li>Grade 10 Maths will be streamable, although not all Maths lessons happen concurrently.</li>
+              <li>In Grade 10, Maths has been blocked against English to support the required grouping structure.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="g6-g10-maths" aria-label="Maths streaming evidence"></div>
+        </article>
+
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>DP2 Maths changes</h3>
+            <ul>
+              <li>Two DP2 Maths AI HL classes have been created, reducing the original AI HL class of 21 into two smaller groups.</li>
+              <li>DP2 AA SL, which had one student, has been collapsed.</li>
+              <li>That student has been added to DP2 AA HL, and the class has been renamed <strong>DP2 AA MX</strong>.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="dp2-maths" aria-label="DP2 Maths evidence"></div>
+        </article>
+
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>Staff allocation and load controls</h3>
+            <ul>
+              <li>Allocations have been updated in consideration of recent POR allocations.</li>
+              <li>LTL SE allocations have been limited to 15 periods.</li>
+              <li>LTLC allocations have been limited to 16 periods.</li>
+              <li>Every effort has been made to reduce the number of preps and the spread of grade levels per teacher.</li>
+              <li>Where possible, teachers have been assigned primarily to Grades 6–8 or Grades 9–10.</li>
+              <li>Prior experience and preferences have been taken into account as far as possible.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="staff-loads" aria-label="Staff load evidence"></div>
+        </article>
+
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>DP1 subject demand and timetable block movement</h3>
+            <ul>
+              <li>DP1 Biology now requires three classes, rather than two as indicated by the first round of DP choices.</li>
+              <li>DP1 Global Politics now requires two classes, rather than one as indicated by the first round of DP choices.</li>
+              <li>To address this, one Biology class has been moved into Block C.</li>
+              <li>Global Politics has been moved into Block D.</li>
+              <li>This preserves the option for students to take three sciences.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="dp1-demand" aria-label="DP1 block movement evidence"></div>
+        </article>
+
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>Languages and MOE Arabic</h3>
+            <ul>
+              <li>Updated language choices have reduced the number of French B classes.</li>
+              <li>This should reduce pressure on the MEL team.</li>
+              <li>A number of Arabic A students have not chosen DP Arabic.</li>
+              <li>Those students will need to take MOE Arabic during lunch or after school because there is no seventh timetable block in the timetable.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="languages" aria-label="Language and Arabic evidence"></div>
+        </article>
+
+        <article class="keypoint-card with-demo full">
+          <div class="keypoint-content">
+            <h3>MYP, ConnectEd and ToK</h3>
+            <ul>
+              <li>MYP PHE will take place as single periods, not doubles.</li>
+              <li>Grade 10 has a Week B slot for Moral Education or MYP Core / Personal Project, in addition to ConnectEd.</li>
+              <li>ConnectEd will take place each week for Grades 6–10 on Friday Period 1 for 30 minutes and Monday Period 4 for one hour.</li>
+              <li>ToK will also have 30 minutes on Friday morning and a further one-hour slot during the week.</li>
+            </ul>
+          </div>
+          <div class="visual-demo" data-demo="myp-connected-tok" aria-label="MYP, ConnectEd and ToK evidence"></div>
+        </article>
+
+        <article class="keypoint-card warning with-demo full">
+          <div class="keypoint-content">
+            <h3>V3 inclusion checks and still-provisional items</h3>
+            <ul>
+              <li>The CP/Careers Programme timetable is included in this V3 build through the Careers Program 1 class and CP-related subjects.</li>
+              <li>No classes are allocated double periods, including DP and PHE.</li>
+              <li>ToK teachers have not yet been assigned because the full candidate list is still awaited.</li>
+              <li>Department meetings are still being added. At present, only Maths, English and Science have been allocated a one-hour department meeting.</li>
+            </ul>
+            <div class="note">Note: the current department meeting allocation is a sequencing issue, not an indication of department prioritisation.</div>
+          </div>
+          <div class="visual-demo" data-demo="provisional" aria-label="Provisional item evidence"></div>
+        </article>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const TIMETABLE_SOURCES = {
+  secondary: {
+    label: 'Secondary',
+    title: 'Secondary Timetable 2026-2027 V3',
+    release: '2026–2027 · Secondary XML',
+    intro: 'Secondary timetable viewer hydrated from an aSc XML export. Replace the secondary XML file beside this HTML file, or load it manually.',
+    candidates: ['secondary-timetable.xml', 'timetable.xml', 'Secondary XML with CP.xml', 'Secondary V3 with CP.xml']
+  },
+  primary: {
+    label: 'Primary',
+    title: 'Primary Timetable 2026-2027',
+    release: '2026–2027 · Primary XML',
+    intro: 'Primary timetable viewer hydrated from an aSc XML export. Replace the primary XML file beside this HTML file, or load it manually.',
+    candidates: ['primary-timetable.xml', 'Primary timetable.xml', 'Primary XML.xml', 'Primary.xml', 'primary.xml']
+  }
+};
+let activeSourceKey = 'secondary';
+let DATA = createEmptyData(activeSourceKey);
+const DATA_CACHE = new Map();
+
+function sourceConfig(sourceKey=activeSourceKey) {
+  return TIMETABLE_SOURCES[sourceKey] || TIMETABLE_SOURCES.secondary;
+}
+function expectedXmlFilename(sourceKey=activeSourceKey) {
+  return sourceConfig(sourceKey).candidates[0];
+}
+function createEmptyData(sourceKey=activeSourceKey) {
+  const config = sourceConfig(sourceKey);
+  return {
+    meta: {
+      title: config.title,
+      sourceXml: '',
+      sourceWorkbook: 'student records ignored; no workbook embedded',
+      generated: new Date().toISOString().slice(0, 10),
+      stats: { classes:0, teachers:0, subjects:0, lessons:0, cards:0, events:0, missingLessons:0, studentsExcluded:0, groups:0 }
+    },
+    periods: [],
+    days: [],
+    events: [],
+    selectors: { class: [], teacher: [], subject: [] }
+  };
+}
+
+const DAY_FALLBACK = [
+  { key:'10000', name:'Monday', short:'Mo' },
+  { key:'01000', name:'Tuesday', short:'Tu' },
+  { key:'00100', name:'Wednesday', short:'We' },
+  { key:'00010', name:'Thursday', short:'Th' },
+  { key:'00001', name:'Friday', short:'Fr' }
+];
+
+function attr(node, name, fallback='') { return node?.getAttribute(name) ?? fallback; }
+function splitIds(value) { return String(value || '').split(',').map(v => v.trim()).filter(Boolean); }
+function nodeList(root, selector) { return Array.from(root.querySelectorAll(selector)); }
+function textClean(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
+function relabelDpBlock(value) {
+  const blockMap = { '1':'A', '2':'B', '3':'C', '4':'D', '5':'E', '6':'F' };
+  return String(value || '').replace(/\bBlock\s*([1-6])\b/gi, (_, n) => `Block ${blockMap[n] || n}`);
+}
+function makeHue(value) {
+  let hash = 0;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  return Math.abs(hash) % 360;
+}
+function weekLabel(weeks) {
+  if (weeks === '1') return ['All weeks', 'All'];
+  if (weeks === '10') return ['Week A', 'A'];
+  if (weeks === '01') return ['Week B', 'B'];
+  if (weeks === '11') return ['All weeks', 'All'];
+  if (!weeks) return ['', ''];
+  return [`Weeks ${weeks}`, weeks];
+}
+function expandDays(value) {
+  const bits = splitIds(value);
+  const out = [];
+  for (const bit of bits) {
+    if (bit === '11111') out.push(...DAY_FALLBACK.map(d => d.key));
+    else if (DAY_FALLBACK.some(d => d.key === bit)) out.push(bit);
+  }
+  return out.length ? out : [''];
+}
+function makeMap(items, idAttr='id') {
+  const map = new Map();
+  items.forEach(item => map.set(attr(item, idAttr), item));
+  return map;
+}
+function naturalKey(value) { return String(value || '').toLowerCase().replace(/(\d+)/g, m => m.padStart(4, '0')); }
+function countFor(events, key, id) {
+  if (key === 'subject') return events.filter(e => e.subjectId === id).length;
+  if (key === 'class') return events.filter(e => e.classIds.includes(id)).length;
+  if (key === 'teacher') return events.filter(e => e.teacherIds.includes(id)).length;
+  return 0;
+}
+function mapName(map, id, fields, fallbackPrefix='') {
+  const node = map.get(id);
+  if (!node) return fallbackPrefix ? `${fallbackPrefix}${id}` : id;
+  for (const field of fields) {
+    const value = textClean(attr(node, field));
+    if (value) return value;
+  }
+  if (fields.includes('name')) return textClean(`${attr(node,'firstname')} ${attr(node,'lastname')}`) || id;
+  return id;
+}
+
+function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceKey) {
+  const config = sourceConfig(sourceKey);
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(xmlText, 'application/xml');
+  const parserError = xml.querySelector('parsererror');
+  if (parserError) throw new Error('The selected file could not be parsed as valid XML.');
+
+  const periodNodes = nodeList(xml, 'periods > period');
+  const dayDefNodes = nodeList(xml, 'daysdefs > daysdef');
+  const weekDefNodes = nodeList(xml, 'weeksdefs > weeksdef');
+  const subjectNodes = nodeList(xml, 'subjects > subject');
+  const teacherNodes = nodeList(xml, 'teachers > teacher');
+  const classroomNodes = nodeList(xml, 'classrooms > classroom');
+  const classNodes = nodeList(xml, 'classes > class');
+  const groupNodes = nodeList(xml, 'groups > group');
+  const lessonNodes = nodeList(xml, 'lessons > lesson');
+  const cardNodes = nodeList(xml, 'cards > card');
+
+  const periods = periodNodes.map(p => ({
+    name: attr(p,'name') || attr(p,'period'),
+    short: attr(p,'short') || attr(p,'period'),
+    period: attr(p,'period'),
+    starttime: attr(p,'starttime'),
+    endtime: attr(p,'endtime')
+  })).sort((a,b) => Number(a.period) - Number(b.period));
+
+  const periodMap = new Map(periods.map(p => [p.period, p]));
+  const subjectMap = makeMap(subjectNodes);
+  const teacherMap = makeMap(teacherNodes);
+  const classroomMap = makeMap(classroomNodes);
+  const classMap = makeMap(classNodes);
+  const groupMap = makeMap(groupNodes);
+  const lessonMap = makeMap(lessonNodes);
+  const weekDefByWeeks = new Map(weekDefNodes.map(w => [attr(w,'weeks'), { name: attr(w,'name'), short: attr(w,'short') }]));
+
+  const days = dayDefNodes
+    .map(d => ({ key: attr(d,'days'), name: attr(d,'name'), short: attr(d,'short') }))
+    .filter(d => DAY_FALLBACK.some(f => f.key === d.key));
+  const dayList = days.length ? DAY_FALLBACK.map(f => days.find(d => d.key === f.key) || f) : DAY_FALLBACK;
+  const dayMap = new Map(dayList.map(d => [d.key, d]));
+
+  let missingLessons = 0;
+  const events = [];
+  cardNodes.forEach((card, cardIndex) => {
+    const lessonId = attr(card, 'lessonid');
+    const lesson = lessonMap.get(lessonId);
+    if (!lesson) { missingLessons++; return; }
+
+    const subjectId = attr(lesson, 'subjectid');
+    const subjectRaw = mapName(subjectMap, subjectId, ['name']);
+    const subjectShortRaw = mapName(subjectMap, subjectId, ['short', 'name']);
+    const subject = relabelDpBlock(subjectRaw);
+    const subjectShort = relabelDpBlock(subjectShortRaw);
+    const teacherIds = splitIds(attr(lesson, 'teacherids'));
+    const classIds = splitIds(attr(lesson, 'classids'));
+    const groupIds = splitIds(attr(lesson, 'groupids'));
+    const roomIds = splitIds(attr(card, 'classroomids') || attr(lesson, 'classroomids'));
+    const period = attr(card, 'period');
+    const periodObj = periodMap.get(period) || { starttime:'', endtime:'' };
+    const time = periodObj.starttime || periodObj.endtime ? `${periodObj.starttime || ''}–${periodObj.endtime || ''}` : `P${period}`;
+    const weeks = attr(card, 'weeks') || attr(lesson, 'weeks') || '';
+    const weekDef = weekDefByWeeks.get(weeks);
+    const [fallbackWeekLabel, fallbackWeekShort] = weekLabel(weeks);
+    const weekLong = weekDef?.name || fallbackWeekLabel;
+    const weekShort = weekDef?.short || fallbackWeekShort;
+    const terms = attr(card, 'terms') || attr(lesson, 'terms') || attr(lesson, 'termsdefid') || '';
+
+    const teachers = uniq(teacherIds.map(id => mapName(teacherMap, id, ['name'])));
+    const classes = uniq(classIds.map(id => mapName(classMap, id, ['name', 'short'])));
+    const groups = uniq(groupIds.map(id => mapName(groupMap, id, ['name'])));
+    const rooms = uniq(roomIds.map(id => mapName(classroomMap, id, ['name', 'short'])));
+    const groupByClassRaw = groupIds.map((groupId, index) => {
+      const group = groupMap.get(groupId);
+      const classId = attr(group, 'classid') || classIds[index] || '';
+      return {
+        id: groupId,
+        name: group ? mapName(groupMap, groupId, ['name']) : groupId,
+        classId,
+        className: classId ? mapName(classMap, classId, ['name', 'short']) : ''
+      };
+    });
+    const groupByClassSeen = new Set();
+    const groupByClass = groupByClassRaw.filter(item => {
+      const key = `${item.classId}|${item.name}`;
+      if (groupByClassSeen.has(key)) return false;
+      groupByClassSeen.add(key);
+      return true;
+    });
+
+    for (const dayKey of expandDays(attr(card, 'days'))) {
+      const day = dayMap.get(dayKey) || { key:dayKey, name:dayKey || 'Unplaced', short:dayKey || '?' };
+      const search = [subject, subjectShort, subjectRaw, subjectShortRaw, ...teachers, ...classes, ...groups, ...rooms, weekLong, day.name, `P${period}`]
+        .map(v => String(v || '').toLowerCase()).join(' ');
+      events.push({
+        id: `${lessonId}_${cardIndex}_${dayKey}_${period}_${weeks}`,
+        lessonId,
+        subjectId,
+        subject,
+        subjectShort,
+        subjectHue: makeHue(subjectId || subject),
+        teacherIds,
+        teachers,
+        classIds,
+        classes,
+        groupIds,
+        groups,
+        groupByClass,
+        roomIds,
+        rooms,
+        dayKey,
+        day: day.name,
+        dayShort: day.short,
+        period,
+        time,
+        weeks,
+        weekLabel: weekLong,
+        weekShort,
+        terms,
+        periodsPerWeek: attr(lesson, 'periodsperweek'),
+        periodsPerCard: attr(lesson, 'periodspercard') || '1',
+        search
+      });
+    }
+  });
+
+  events.sort((a,b) => {
+    const dayDiff = DAY_FALLBACK.findIndex(d => d.key === a.dayKey) - DAY_FALLBACK.findIndex(d => d.key === b.dayKey);
+    if (dayDiff) return dayDiff;
+    const periodDiff = Number(a.period || 0) - Number(b.period || 0);
+    if (periodDiff) return periodDiff;
+    return naturalKey(`${a.subject} ${a.classes.join(' ')}`).localeCompare(naturalKey(`${b.subject} ${b.classes.join(' ')}`));
+  });
+
+  function selectorRows(nodes, kind) {
+    return nodes.map(node => {
+      const id = attr(node, 'id');
+      const rawName = kind === 'teacher'
+        ? (textClean(attr(node,'name')) || textClean(`${attr(node,'firstname')} ${attr(node,'lastname')}`) || id)
+        : (textClean(attr(node,'name')) || textClean(attr(node,'short')) || id);
+      const rawShort = textClean(attr(node,'short')) || rawName;
+      const name = kind === 'subject' ? relabelDpBlock(rawName) : rawName;
+      const short = kind === 'subject' ? relabelDpBlock(rawShort) : rawShort;
+      const count = countFor(events, kind, id);
+      return { id, name, short, count, contractCount: count };
+    }).filter(row => row.count > 0 || kind === 'class')
+      .sort((a,b) => naturalKey(a.name).localeCompare(naturalKey(b.name)));
+  }
+
+  return {
+    meta: {
+      title: config.title,
+      sourceKey,
+      sourceLabel: config.label,
+      sourceXml: sourceName,
+      sourceWorkbook: 'student records ignored; no workbook embedded',
+      generated: new Date().toISOString().slice(0, 10),
+      stats: {
+        classes: classNodes.length,
+        teachers: teacherNodes.length,
+        subjects: subjectNodes.length,
+        lessons: lessonNodes.length,
+        cards: cardNodes.length,
+        events: events.length,
+        missingLessons,
+        studentsExcluded: nodeList(xml, 'students > student').length,
+        groups: groupNodes.length
+      }
+    },
+    periods,
+    days: dayList,
+    events,
+    selectors: {
+      class: selectorRows(classNodes, 'class'),
+      teacher: selectorRows(teacherNodes, 'teacher'),
+      subject: selectorRows(subjectNodes, 'subject')
+    }
+  };
+}
+
+function setXmlStatus(message, isError=false) {
+  const el = document.getElementById('xmlStatus');
+  if (!el) return;
+  el.innerHTML = message;
+  el.style.color = isError ? '#9f2f2f' : '';
+}
+async function loadXmlFromDefault() {
+  const config = sourceConfig();
+  for (const path of config.candidates) {
+    try {
+      const response = await fetch(`${path}?v=${Date.now()}`, { cache:'no-store' });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const text = await response.text();
+      DATA = parseAscXml(text, path, activeSourceKey);
+      DATA_CACHE.set(activeSourceKey, DATA);
+      setXmlStatus(`<strong>${esc(config.label)} loaded:</strong> ${esc(path)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+      return true;
+    } catch (err) {}
+  }
+  setXmlStatus(`${esc(config.label)} XML was not found. Place <strong>${esc(expectedXmlFilename())}</strong> beside this HTML file, or use the manual XML loader.`, true);
+  DATA = createEmptyData(activeSourceKey);
+  DATA_CACHE.set(activeSourceKey, DATA);
+  return false;
+}
+async function loadXmlFromFile(file) {
+  const config = sourceConfig();
+  const text = await file.text();
+  DATA = parseAscXml(text, file.name, activeSourceKey);
+  DATA_CACHE.set(activeSourceKey, DATA);
+  setXmlStatus(`<strong>${esc(config.label)} loaded manually:</strong> ${esc(file.name)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+  return true;
+}
+const state = { view:'class', id:null, week:'all', detailed:true };
+const viewMode = document.getElementById('viewMode');
+const entitySelect = document.getElementById('entitySelect');
+const weekFilter = document.getElementById('weekFilter');
+const detailToggle = document.getElementById('detailToggle');
+const table = document.getElementById('ttTable');
+const summary = document.getElementById('summary');
+const activeTitle = document.getElementById('activeTitle');
+const activeSubtitle = document.getElementById('activeSubtitle');
+const sourceNote = document.getElementById('sourceNote');
+const footerNote = document.getElementById('footerNote');
+const sourceProfile = document.getElementById('sourceProfile');
+const pageTitle = document.getElementById('pageTitle');
+const pageIntro = document.getElementById('pageIntro');
+const releaseChip = document.getElementById('releaseChip');
+const allocationSearch = document.getElementById('allocationSearch');
+const allocationLoadFilter = document.getElementById('allocationLoadFilter');
+const allocationSort = document.getElementById('allocationSort');
+const teacherAllocationTable = document.getElementById('teacherAllocationTable');
+const allocationSummary = document.getElementById('allocationSummary');
+const downloadAllocationCsvButton = document.getElementById('downloadAllocationCsv');
+if (detailToggle) detailToggle.checked = state.detailed;
+
+const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.section;
+    document.querySelectorAll('.page-section').forEach(section => section.classList.toggle('active', section.id === target));
+    tabButtons.forEach(other => other.setAttribute('aria-selected', String(other === btn)));
+  });
+});
+
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function includesWeek(ev) {
+  if (state.week === 'all') return true;
+  if (!ev.weeks || ev.weeks === '1' || ev.weeks === '11' || ev.weekShort === 'All') return true;
+  if (state.week === 'A') return ev.weeks[0] === '1';
+  if (state.week === 'B') return ev.weeks[1] === '1';
+  return true;
+}
+function matchesView(ev) {
+  if (!state.id) return false;
+  if (state.view === 'class') return ev.classIds.includes(state.id);
+  if (state.view === 'teacher') return ev.teacherIds.includes(state.id);
+  if (state.view === 'subject') return ev.subjectId === state.id;
+  return false;
+}
+function selectedOption() {
+  return (DATA.selectors[state.view] || []).find(x => x.id === state.id) || null;
+}
+function populateSelect(keep=false) {
+  const previous = keep ? state.id : null;
+  const items = DATA.selectors[state.view] || [];
+  entitySelect.innerHTML = items.map(item => `<option value="${esc(item.id)}">${esc(item.name)}${item.short && item.short !== item.name ? ' ['+esc(item.short)+']' : ''}</option>`).join('');
+  if (previous && items.some(x => x.id === previous)) state.id = previous;
+  else state.id = items[0]?.id || null;
+  if (state.id) entitySelect.value = state.id;
+}
+function weekText(ev) {
+  if (ev.weekShort === 'A') return '<span class="badge a">A</span>';
+  if (ev.weekShort === 'B') return '<span class="badge b">B</span>';
+  return '<span class="badge">All</span>';
+}
+function filteredEvents() {
+  return DATA.events.filter(ev => matchesView(ev) && includesWeek(ev));
+}
+function groupForSelectedClass(ev) {
+  if (state.view !== 'class') return ev.groups.join(', ');
+  const gs = ev.groupByClass.filter(g => g.classId === state.id).map(g => g.name);
+  return gs.length ? gs.join(', ') : ev.groups.join(', ');
+}
+function cardHtml(ev) {
+  const subject = ev.subject || ev.subjectShort || 'Lesson';
+  const g = groupForSelectedClass(ev);
+  const groupLine = g && g !== 'Entire class' ? `<strong>Group:</strong> ${esc(g)}` : '';
+
+  if (!state.detailed) {
+    const lines = [];
+    if (state.view !== 'class') lines.push(`<strong>Class:</strong> ${esc(ev.classes.join(', ') || '—')}`);
+    if (groupLine) lines.push(groupLine);
+    if (state.view !== 'teacher' && ev.teachers.length) lines.push(`<strong>Teacher:</strong> ${esc(ev.teachers.join(', '))}`);
+    if (ev.rooms.length) lines.push(`<strong>Room:</strong> ${esc(ev.rooms.join(', '))}`);
+    return `<div class="card compact" style="--h:${ev.subjectHue}">
+      <div class="topline"><div class="subject">${esc(subject)}</div></div>
+      ${lines.length ? `<div class="meta">${lines.join('<br>')}</div>` : ''}
+    </div>`;
+  }
+
+  let lines = [];
+  if (state.view !== 'class') lines.push(`<strong>Class:</strong> ${esc(ev.classes.join(', ') || '—')}`);
+  if (groupLine) lines.push(groupLine);
+  if (state.view !== 'teacher') lines.push(`<strong>Teacher:</strong> ${esc(ev.teachers.join(', ') || '—')}`);
+  lines.push(`<strong>Room:</strong> ${esc(ev.rooms.join(', ') || '—')}`);
+  return `<div class="card detailed" style="--h:${ev.subjectHue}">
+    <div class="topline"><div class="subject">${esc(subject)}</div>${weekText(ev)}</div>
+    <div class="meta">${lines.join('<br>')}</div>
+  </div>`;
+}
+function renderTable() {
+  const events = filteredEvents();
+  const bySlot = new Map();
+  for (const ev of events) {
+    const key = `${ev.dayKey}|${ev.period}`;
+    if (!bySlot.has(key)) bySlot.set(key, []);
+    bySlot.get(key).push(ev);
+  }
+  for (const arr of bySlot.values()) {
+    arr.sort((a,b) => (a.subject+a.classes.join(',')+a.teachers.join(',')).localeCompare(b.subject+b.classes.join(',')+b.teachers.join(','), undefined, {numeric:true}));
+  }
+  let html = '<thead><tr><th>Period</th>' + DATA.days.map(d => `<th>${esc(d.name)}</th>`).join('') + '</tr></thead><tbody>';
+  for (const p of DATA.periods) {
+    html += `<tr><th><div class="period">P${esc(p.period)}</div><div class="time">${esc(p.starttime)}–${esc(p.endtime)}</div></th>`;
+    for (const d of DATA.days) {
+      const arr = bySlot.get(`${d.key}|${p.period}`) || [];
+      html += `<td>${arr.length ? arr.map(cardHtml).join('') : '<div class="cell-empty">No lesson</div>'}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+function isDepartmentMeeting(ev) {
+  const haystack = [ev.subject, ev.subjectShort, ...ev.classes, ...ev.groups]
+    .map(v => String(v || '').toLowerCase()).join(' ');
+  return /\b(department|dept\.?|dep\.?)\s*(meeting|mtg)\b|\b(meeting|mtg)\s*(department|dept\.?|dep\.?)\b/.test(haystack);
+}
+function eventActiveInWeek(ev, week) {
+  if (!ev.weeks || ev.weeks === '1' || ev.weeks === '11' || ev.weekShort === 'All') return true;
+  if (week === 'A') return ev.weeks[0] === '1';
+  if (week === 'B') return ev.weeks[1] === '1';
+  return true;
+}
+function summaryEventWeight(ev) {
+  if (state.week !== 'all') return 1;
+  if (ev.weeks === '10' || ev.weeks === '01') return 0.5;
+  return 1;
+}
+function formatLessonCount(value) {
+  const rounded = Math.round(Number(value || 0) * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+function gradeFromText(value) {
+  const text = String(value || '').trim();
+  let match = text.match(/\b(FS\s*[12]|KG\s*[12]|EY\s*[12]|Nursery|Reception)\b/i);
+  if (match) return match[1].replace(/\s+/g, '').toUpperCase();
+  match = text.match(/\bDP\s*([12])\b/i);
+  if (match) return `DP${match[1]}`;
+  if (/\b(CP|Careers?\s*Program(?:me)?)\b/i.test(text)) return 'CP';
+  match = text.match(/\b(?:Grade|Gr|Year|Yr|G)\s*(0|[1-9]|1[0-2])\b/i);
+  if (match) return `G${Number(match[1])}`;
+  match = text.match(/(?:^|[^A-Za-z0-9])(0|[1-9]|1[0-2])[A-Z]{1,4}(?:\b|[^A-Za-z0-9])/i);
+  if (match) return `G${Number(match[1])}`;
+  match = text.match(/(?:^|[^A-Za-z0-9])(0|[1-9]|1[0-2])(?:\b|[^A-Za-z0-9])/i);
+  if (match) return `G${Number(match[1])}`;
+  return '';
+}
+function gradeForEvent(ev) {
+  for (const value of [...ev.classes, ...ev.groups]) {
+    const grade = gradeFromText(value);
+    if (grade) return grade;
+  }
+  return '';
+}
+function cleanSubjectForSummary(value) {
+  const original = textClean(value || 'Lesson');
+  const cleaned = original
+    .replace(/^\s*(?:Grade|Gr|Year|Yr|G)\s*(?:6|7|8|9|10|11|12)\s*[-:–—]?\s*/i, '')
+    .replace(/^\s*DP\s*[12]\s*[-:–—]?\s*/i, '')
+    .replace(/^\s*CP\s*[-:–—]?\s*/i, '')
+    .trim();
+  return cleaned || original;
+}
+function subjectCountLabel(ev) {
+  const grade = gradeForEvent(ev);
+  const subject = cleanSubjectForSummary(ev.subject || ev.subjectShort || 'Lesson');
+  return grade ? `${grade} ${subject}` : subject;
+}
+function subjectCountsForSummary(events) {
+  const counts = new Map();
+  for (const ev of events) {
+    if (isDepartmentMeeting(ev)) continue;
+    const label = subjectCountLabel(ev);
+    counts.set(label, (counts.get(label) || 0) + summaryEventWeight(ev));
+  }
+  return Array.from(counts.entries())
+    .sort((a,b) => (b[1] - a[1]) || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+}
+function statHtml(label, value, detail='', className='') {
+  return `<div class="stat ${esc(className)}"><b>${esc(value)}</b><span>${esc(label)}</span>${detail ? `<span>${esc(detail)}</span>` : ''}</div>`;
+}
+function renderSummary() {
+  const opt = selectedOption();
+  const events = filteredEvents();
+  const allViewEvents = DATA.events.filter(ev => matchesView(ev));
+  const nonDeptVisible = events.filter(ev => !isDepartmentMeeting(ev));
+  const nonDeptAllViewEvents = allViewEvents.filter(ev => !isDepartmentMeeting(ev));
+  const weekA = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'A')).length;
+  const weekB = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'B')).length;
+  const lessonCount = state.week === 'all'
+    ? nonDeptAllViewEvents.reduce((total, ev) => total + summaryEventWeight(ev), 0)
+    : nonDeptVisible.length;
+  const rooms = new Set(events.flatMap(e => e.rooms).filter(Boolean));
+  const teachers = new Set(events.flatMap(e => e.teachers).filter(Boolean));
+  const classes = new Set(events.flatMap(e => e.classes).filter(Boolean));
+  const contract = opt?.contractCount;
+  const weekLabel = state.week === 'all' ? 'all weeks' : `Week ${state.week}`;
+  const subjectCounts = subjectCountsForSummary(events);
+  const subjectText = subjectCounts.length
+    ? subjectCounts.map(([k,v]) => `${k} (${formatLessonCount(v)})`).join(', ')
+    : 'No non-department lessons';
+
+  activeTitle.textContent = `${state.view[0].toUpperCase() + state.view.slice(1)}: ${opt?.name || '—'}`;
+  activeSubtitle.textContent = `${formatLessonCount(lessonCount)} lesson${Number(lessonCount) === 1 ? '' : 's'} counted for ${weekLabel}; department meetings excluded.`;
+  sourceNote.textContent = `${DATA.meta.sourceLabel || sourceConfig().label} · ${DATA.meta.sourceXml} · ${DATA.meta.sourceWorkbook}`;
+
+  const entityLabel = state.view === 'teacher' ? 'Classes taught' : state.view === 'class' ? 'Teachers' : 'Teachers';
+  const entityCount = state.view === 'class' ? teachers.size : state.view === 'teacher' ? classes.size : teachers.size;
+  const stats = [
+    statHtml('Number of lessons', formatLessonCount(lessonCount), 'Department meetings excluded'),
+    `<div class="stat wide subject-summary"><b>${esc(subjectText)}</b><span>Subjects taught</span><span>Counts exclude department meetings</span></div>`,
+    statHtml('Week A / B lessons', `${weekA} / ${weekB}`, 'Non-department lessons active each week'),
+    statHtml(entityLabel, entityCount, 'Unique linked entities'),
+    statHtml('Load count', contract ?? '—', 'Estimated average weekly periods from XML')
+  ];
+  summary.innerHTML = stats.join('');
+  footerNote.innerHTML = '';
+}
+function render() { renderSummary(); renderTable(); }
+function csvEscape(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function downloadCsv() {
+  const rows = [['View','Selected','Week','Day','Period','Time','Subject','Classes','Groups','Teachers','Rooms','Week Label']];
+  const opt = selectedOption();
+  for (const ev of filteredEvents().sort((a,b)=>(a.dayKey+a.period).localeCompare(b.dayKey+b.period))) {
+    rows.push([state.view, opt?.name || '', state.week, ev.day, ev.period, ev.time, ev.subject, ev.classes.join('; '), ev.groups.join('; '), ev.teachers.join('; '), ev.rooms.join('; '), ev.weekLabel]);
+  }
+  const csv = rows.map(r=>r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `timetable_${state.view}_${(opt?.name || 'selected').replace(/[^a-z0-9]+/gi,'_')}_${state.week}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function copySummary() {
+  const opt = selectedOption();
+  const events = filteredEvents();
+  const lines = events.map(ev => `${ev.day} P${ev.period} (${ev.time}): ${ev.subject} | Classes: ${ev.classes.join(', ')} | Groups: ${ev.groups.join(', ')} | Teachers: ${ev.teachers.join(', ')} | Rooms: ${ev.rooms.join(', ')} | ${ev.weekLabel}`);
+  navigator.clipboard.writeText(`${state.view}: ${opt?.name || ''}\nWeek: ${state.week}\n\n${lines.join('\n')}`);
+}
+viewMode.addEventListener('change', e => { state.view = e.target.value; populateSelect(false); render(); });
+entitySelect.addEventListener('change', e => { state.id = e.target.value; render(); });
+weekFilter.addEventListener('change', e => { state.week = e.target.value; render(); });
+detailToggle.addEventListener('change', e => { state.detailed = e.target.checked; render(); });
+document.getElementById('downloadCsv').addEventListener('click', downloadCsv);
+document.getElementById('copySummary').addEventListener('click', copySummary);
+
+function setActiveSection(target) {
+  document.querySelectorAll('.page-section').forEach(section => section.classList.toggle('active', section.id === target));
+  tabButtons.forEach(other => other.setAttribute('aria-selected', String(other.dataset.section === target)));
+}
+function openRelatedView(view, name, week='all') {
+  const items = DATA.selectors[view] || [];
+  const wanted = String(name || '').trim().toLowerCase();
+  const match = items.find(x => String(x.name || '').trim().toLowerCase() === wanted || String(x.short || '').trim().toLowerCase() === wanted)
+    || items.find(x => String(x.name || '').toLowerCase().includes(wanted) || String(x.short || '').toLowerCase().includes(wanted));
+  if (!match) return;
+  state.view = view;
+  state.id = match.id;
+  state.week = week;
+  viewMode.value = view;
+  populateSelect(true);
+  entitySelect.value = match.id;
+  weekFilter.value = week;
+  render();
+  setActiveSection('timetableSection');
+  document.getElementById('timetableSection').scrollIntoView({behavior:'smooth', block:'start'});
+}
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-open-view]');
+  if (!btn) return;
+  openRelatedView(btn.dataset.openView, btn.dataset.openName, btn.dataset.openWeek || 'all');
+});
+function uniq(arr) { return Array.from(new Set((arr || []).filter(Boolean))); }
+function dayIndex(name) { return DATA.days.findIndex(d => d.name === name); }
+function slotSort(a,b) { return (dayIndex(a.day)-dayIndex(b.day)) || (Number(a.period)-Number(b.period)); }
+function eventSlot(ev) { return `${ev.day} P${ev.period}`; }
+function dedupGroups(ev) { return uniq(ev.groups || []); }
+function compactList(items, max=4) {
+  const u = uniq(items);
+  if (u.length <= max) return u;
+  return u.slice(0,max).concat(`+${u.length-max} more`);
+}
+function chips(items, cls='') { return uniq(items).map(x => `<span class="mini-chip ${cls}">${esc(x)}</span>`).join(''); }
+function action(view, name, label, week='all', primary=false) {
+  return `<button type="button" class="${primary ? 'primary-mini' : ''}" data-open-view="${esc(view)}" data-open-name="${esc(name)}" data-open-week="${esc(week)}">${esc(label)}</button>`;
+}
+function metric(label, value, help='') { return `<div class="metric"><b>${esc(value)}</b><span>${esc(label)}${help ? '<br>'+esc(help) : ''}</span></div>`; }
+function miniTable(headers, rows) {
+  return `<table class="mini-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+function bySlot(events) {
+  const m = new Map();
+  for (const ev of events) {
+    const key = `${ev.day}|${ev.period}|${ev.time}`;
+    if (!m.has(key)) m.set(key, []);
+    m.get(key).push(ev);
+  }
+  return Array.from(m.entries()).map(([key, arr]) => {
+    const [day, period, time] = key.split('|');
+    return { day, period, time, events: arr };
+  }).sort(slotSort);
+}
+function renderG6G10Maths(el) {
+  const g6 = DATA.events.filter(e => e.subject === 'MATH' && e.classes.some(c => /^6/.test(c)));
+  const g6Slots = bySlot(g6).map(s => ({...s, classes:uniq(s.events.flatMap(e=>e.classes).filter(c=>/^6/.test(c))), teachers:uniq(s.events.flatMap(e=>e.teachers))}));
+  const maxConcurrent = Math.max(...g6Slots.map(s => s.classes.length));
+  const g6Rows = g6Slots.filter(s => s.classes.length >= 2).slice(0, 8).map(s => [
+    `<span class="slot">${esc(s.day)} P${esc(s.period)}</span><div class="tiny">${esc(s.time)}</div>`,
+    `<div class="inline-chips">${chips(s.classes, s.classes.length >= 3 ? 'green' : 'blue')}</div>`,
+    esc(compactList(s.teachers, 3).join(', '))
+  ]);
+  const g10 = DATA.events.filter(e => ['MATH','ENGLISH'].includes(e.subject) && e.classes.some(c => /^10/.test(c)));
+  const g10Slots = bySlot(g10).map(s => {
+    const math = s.events.filter(e=>e.subject==='MATH').flatMap(e=>e.classes).filter(c=>/^10/.test(c));
+    const eng = s.events.filter(e=>e.subject==='ENGLISH').flatMap(e=>e.classes).filter(c=>/^10/.test(c));
+    return {...s, math:uniq(math), eng:uniq(eng)};
+  }).filter(s => s.math.length && s.eng.length);
+  const g10Rows = g10Slots.map(s => [
+    `<span class="slot">${esc(s.day)} P${esc(s.period)}</span><div class="tiny">${esc(s.time)}</div>`,
+    `<div class="inline-chips">${chips(s.math,'green')}</div>`,
+    `<div class="inline-chips">${chips(s.eng,'red')}</div>`
+  ]);
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">Timetable snapshot: Maths blocking</div><div class="demo-subtitle">Grade 6 concurrency and Grade 10 Maths/English counter-blocking are drawn from the embedded timetable cards.</div></div></div>
+    <div class="metric-grid">${metric('G6 maths cards', g6.length)}${metric('Largest G6 concurrent block', maxConcurrent + ' classes')}${metric('G10 Maths/English shared slots', g10Slots.length)}</div>
+    <div class="snapshot-pair">
+      <div class="snapshot-box"><h4>G6 Maths concurrent slots</h4>${miniTable(['Slot','Classes','Teachers'], g6Rows)}</div>
+      <div class="snapshot-box"><h4>G10 Maths blocked against English</h4>${miniTable(['Slot','Maths','English'], g10Rows)}</div>
+    </div>
+    <div class="demo-actions">${action('subject','MATH','Open Maths subject','all',true)}${action('class','6A','Open 6A')}${action('class','10A','Open 10A')}</div>`;
+}
+function renderDP2Maths(el) {
+  const maths = DATA.events.filter(e => e.classes.includes('DP2') && dedupGroups(e).some(g => /math/i.test(g)));
+  const groups = new Map();
+  for (const ev of maths) {
+    for (const g of dedupGroups(ev).filter(x => /math|AA HL|AI HL|MOE Arabic/i.test(x))) {
+      if (!/math|AA HL|AI HL/i.test(g)) continue;
+      if (!groups.has(g)) groups.set(g, {group:g, teachers:new Set(), slots:new Set(), cards:0});
+      const item = groups.get(g);
+      ev.teachers.forEach(t=>item.teachers.add(t || 'Unassigned'));
+      item.slots.add(eventSlot(ev));
+      item.cards += 1;
+    }
+  }
+  const rows = Array.from(groups.values()).sort((a,b)=>a.group.localeCompare(b.group, undefined, {numeric:true})).map(item => [
+    `<strong>${esc(item.group)}</strong>`,
+    esc(Array.from(item.teachers).filter(Boolean).join(', ') || 'Unassigned'),
+    `<div class="inline-chips">${chips(Array.from(item.slots).sort(), 'blue')}</div>`
+  ]);
+  const aiHlCount = Array.from(groups.keys()).filter(g => /AI HL/i.test(g)).length;
+  const aaMx = Array.from(groups.keys()).find(g => /AA MX/i.test(g)) || 'G5. Math AA MX';
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">Interactive block: DP2 Maths restructuring</div><div class="demo-subtitle">aSc labels show DP2 Maths in Group 5 / Group 5 HL, including AI HL.1, AI HL.2 and AA MX.</div></div></div>
+    <div class="demo-flow"><div class="flow-box"><b>Before</b><span>One DP2 Maths AI HL group of 21 students.</span></div><div class="flow-arrow">→</div><div class="flow-box"><b>Now</b><span>${esc(aiHlCount)} AI HL timetable groups plus ${esc(aaMx)} after collapsing AA SL.</span></div></div>
+    ${miniTable(['Group label','Teacher','Visible slots'], rows)}
+    <div class="demo-actions">${action('subject','Group 5','Open DP2 Group 5','all',true)}${action('subject','Group 5 HL','Open Group 5 HL')}${action('class','DP2','Open DP2')}</div>`;
+}
+function renderStaffLoads(el) {
+  const teachers = DATA.selectors.teacher || [];
+  const relevant = teachers.filter(t => Number(t.contractCount) <= 16).sort((a,b)=>Number(a.contractCount)-Number(b.contractCount) || a.name.localeCompare(b.name));
+  const at15 = relevant.filter(t => Number(t.contractCount) === 15).length;
+  const at16 = relevant.filter(t => Number(t.contractCount) === 16).length;
+  const bars = relevant.slice(0, 12).map(t => {
+    const pct = Math.min(100, Math.round((Number(t.contractCount || 0)/21)*100));
+    return `<div class="bar-row"><div class="bar-name" title="${esc(t.name)}">${esc(t.name)}</div><div class="bar-track"><div class="bar-fill" style="--w:${pct}%"></div></div><b>${esc(t.contractCount)}</b></div>`;
+  }).join('');
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">Load-control snapshot</div><div class="demo-subtitle">This uses an estimated average weekly period count derived from the XML. Week A/B-only cards count as 0.5. POR labels are not encoded directly in aSc, so this block shows load bands rather than role membership.</div></div></div>
+    <div class="metric-grid">${metric('Teachers at 15', at15)}${metric('Teachers at 16', at16)}${metric('Teachers at or below 16', relevant.length)}</div>
+    <div class="bar-list">${bars}</div>
+    <div class="demo-note">Use the teacher view to inspect individual spread of classes, subjects and grade levels.</div>
+    <div class="demo-actions">${action('teacher', relevant[0]?.name || 'Kristopher Watson (OGoill)', 'Open lowest-load example','all',true)}${action('teacher','Miles Dibsdall','Open 16-period example')}</div>`;
+}
+function renderDP1Demand(el) {
+  const dp1 = DATA.events.filter(e => e.classes.some(c=>/^DP1/.test(c)));
+  const bio = dp1.filter(e => dedupGroups(e).some(g=>/biology|bio\b/i.test(g)));
+  const gp = dp1.filter(e => dedupGroups(e).some(g=>/global pol/i.test(g)));
+  function groupRows(events, cls) {
+    const m = new Map();
+    for (const ev of events) {
+      const relevant = dedupGroups(ev).filter(g => cls === 'bio' ? /biology|bio\b/i.test(g) : /global pol/i.test(g));
+      for (const g of relevant) {
+        if (!m.has(g)) m.set(g, {group:g, subject:ev.subject, slots:new Set(), teachers:new Set()});
+        const item = m.get(g); item.slots.add(eventSlot(ev)); ev.teachers.forEach(t=>item.teachers.add(t));
+      }
+    }
+    return Array.from(m.values()).sort((a,b)=>a.group.localeCompare(b.group, undefined, {numeric:true}));
+  }
+  const bioGroups = groupRows(bio, 'bio');
+  const gpGroups = groupRows(gp, 'gp');
+  const rows = bioGroups.concat(gpGroups).map(item => [
+    `<strong>${esc(item.group)}</strong><div class="tiny">${esc(item.subject)}</div>`,
+    esc(Array.from(item.teachers).filter(Boolean).join(', ') || 'Unassigned'),
+    `<div class="inline-chips">${chips(Array.from(item.slots).sort().slice(0,4), item.group.toLowerCase().includes('global') ? 'amber' : 'green')}</div>`
+  ]);
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">DP1 demand check: Biology and Global Politics</div><div class="demo-subtitle">This snapshot counts distinct DP1 group labels visible in the embedded timetable.</div></div></div>
+    <div class="metric-grid">${metric('Biology groups', bioGroups.length)}${metric('Global Politics groups', gpGroups.length)}${metric('Combined DP1 Bio/GP cards', bio.length + gp.length)}</div>
+    ${miniTable(['Course / timetable block','Teacher','Sample slots'], rows)}
+    <div class="demo-note">The timetable block names are relabelled as Block A–F to avoid confusion with aSc group labels. The group names carry the more specific DP course information.</div>
+    <div class="demo-actions">${action('subject','DP1 Block D','Open DP1 Block D','all',true)}${action('subject','DP1 Block E','Open DP1 Block E')}${action('subject','DP1 Block F','Open DP1 Block F')}</div>`;
+}
+function renderLanguages(el) {
+  const dp = DATA.events.filter(e => e.classes.some(c=>/^DP/.test(c)));
+  const french = dp.filter(e => dedupGroups(e).some(g=>/french/i.test(g)));
+  const arabic = dp.filter(e => dedupGroups(e).some(g=>/arabic/i.test(g)));
+  const moe = dp.filter(e => dedupGroups(e).some(g=>/moe arabic/i.test(g)));
+  const frenchGroups = uniq(french.flatMap(e=>dedupGroups(e).filter(g=>/french/i.test(g))));
+  const moeRows = moe.map(e => [
+    `<span class="slot">${esc(eventSlot(e))}</span><div class="tiny">${esc(e.time)}</div>`,
+    `<div class="inline-chips">${chips(dedupGroups(e).filter(g=>/moe arabic/i.test(g)), 'amber')}</div>`,
+    esc(e.teachers.join(', ') || 'Unassigned')
+  ]);
+  const periodRows = DATA.periods.map(p => [`<span class="slot">P${esc(p.period)}</span>`, esc(`${p.starttime}–${p.endtime}`)]);
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">Language and Arabic constraints</div><div class="demo-subtitle">French/Arabic groups are visible; a separate seventh timetable block is not present in the timetable structure.</div></div></div>
+    <div class="metric-grid">${metric('DP French groups', frenchGroups.length)}${metric('DP Arabic-labelled cards', arabic.length)}${metric('Scheduled periods per day', DATA.periods.length, 'P1-P6 only')}</div>
+    <div class="snapshot-pair">
+      <div class="snapshot-box"><h4>Daily structure</h4>${miniTable(['Period','Time'], periodRows)}</div>
+      <div class="snapshot-box"><h4>MOE Arabic visible in current build</h4>${moeRows.length ? miniTable(['Slot','Group','Teacher'], moeRows) : '<div class="demo-note">No MOE Arabic cards found in the embedded DP timetable.</div>'}</div>
+    </div>
+    <div class="demo-note">Where students require MOE Arabic outside the six-period structure, that lunch/after-school arrangement is an operational constraint rather than a standard P7 timetable card.</div>
+    <div class="demo-actions">${action('subject','FRENCH','Open French subject','all',true)}${action('subject','DP Islamic','Open DP Islamic')}${action('class','DP2','Open DP2')}</div>`;
+}
+function renderMypConnectedTok(el) {
+  const phe = DATA.events.filter(e => /^PHE/.test(e.subject));
+  const single = phe.filter(e => String(e.periodsPerCard) === '1').length;
+  const connected = DATA.events.filter(e => e.subject === 'CONNECTED');
+  const connSlots = bySlot(connected).map(s => ({...s, classes:uniq(s.events.flatMap(e=>e.classes).filter(c=>/^(6|7|8|9|10)/.test(c)))}));
+  const tok = DATA.events.filter(e => e.subject === 'Theory of Knowledge');
+  const tokSlots = bySlot(tok).map(s => ({...s, classes:uniq(s.events.flatMap(e=>e.classes)), teachers:uniq(s.events.flatMap(e=>e.teachers))}));
+  const g10Mcore = DATA.events.filter(e => e.subject === 'MCore' && e.classes.some(c=>/^10/.test(c)));
+  const connRows = connSlots.map(s => [
+    `<span class="slot">${esc(s.day)} P${esc(s.period)}</span><div class="tiny">${esc(s.time)}</div>`,
+    `<div class="inline-chips">${chips(compactList(s.classes, 10), 'green')}</div>`
+  ]);
+  const tokRows = tokSlots.map(s => [
+    `<span class="slot">${esc(s.day)} P${esc(s.period)}</span><div class="tiny">${esc(s.time)}</div>`,
+    `<div class="inline-chips">${chips(s.classes, 'blue')}</div>`,
+    esc(compactList(s.teachers, 3).join(', ') || 'Unassigned')
+  ]);
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">MYP / ConnectEd / ToK snapshot</div><div class="demo-subtitle">This combines PHE period length checks with the recurring ConnectEd and ToK slots.</div></div></div>
+    <div class="metric-grid">${metric('PHE single-period cards', single + '/' + phe.length)}${metric('ConnectEd slots', connSlots.length)}${metric('G10 MCore cards', g10Mcore.length)}</div>
+    <div class="snapshot-pair">
+      <div class="snapshot-box"><h4>ConnectEd, Grades 6–10</h4>${miniTable(['Slot','Classes'], connRows)}</div>
+      <div class="snapshot-box"><h4>ToK visible slots</h4>${miniTable(['Slot','Classes','Teacher'], tokRows)}</div>
+    </div>
+    <div class="demo-note">Friday P1 is represented as a timetable slot; the 30-minute operational duration should be interpreted through the school’s Friday morning structure.</div>
+    <div class="demo-actions">${action('subject','CONNECTED','Open ConnectEd','all',true)}${action('subject','Theory of Knowledge','Open ToK')}${action('subject','PHE Boys','Open PHE Boys')}</div>`;
+}
+function renderProvisional(el) {
+  const cpClasses = (DATA.selectors.class || []).filter(c=>/(^CP\b|career)/i.test(c.name));
+  const maxCard = Math.max(...DATA.events.map(e=>Number(e.periodsPerCard || 0)));
+  const tok = DATA.events.filter(e => e.subject === 'Theory of Knowledge');
+  const unassignedTok = tok.filter(e => !e.teachers.length).length;
+  const dept = DATA.events.filter(e => e.subject === 'Dept Meeting');
+  const checks = [
+    ['CP / Careers Programme', cpClasses.length ? `${cpClasses.length} CP/Careers class found` : 'Not found in class list', 'V3 includes Careers Program 1 and CP-related subject cards where present in the XML.'],
+    ['Double periods', maxCard > 1 ? `Max card length: ${maxCard}` : 'None found', 'Every scheduled card currently has periodsPerCard = 1.'],
+    ['ToK teacher assignment', `${unassignedTok}/${tok.length} unassigned`, 'Most ToK cards are intentionally awaiting final teacher allocation.'],
+    ['Department meetings', `${dept.length} cards visible`, 'Only the currently added department meeting cards are shown.']
+  ];
+  const html = checks.map(([label, value, note]) => `<div class="status-check"><b>${esc(label)}: ${esc(value)}</b><span>${esc(note)}</span></div>`).join('');
+  const deptRows = dept.map(e => [`<span class="slot">${esc(eventSlot(e))}</span><div class="tiny">${esc(e.time)}</div>`, esc(compactList(e.teachers, 5).join(', '))]);
+  el.innerHTML = `<div class="demo-header"><div><div class="demo-title">Provisional-item integrity checks</div><div class="demo-subtitle">These checks distinguish what is missing from what is intentionally represented as a single-period or unassigned item.</div></div></div>
+    <div class="status-checks">${html}</div>
+    <div class="section-label">Visible department meeting cards</div>
+    ${deptRows.length ? miniTable(['Slot','Teachers / department group'], deptRows) : '<div class="demo-note">No department meeting cards are currently embedded.</div>'}
+    <div class="demo-actions">${action('class','Careers Program 1','Open Careers Program','all',true)}${action('subject','BTEC','Open BTEC')}${action('subject','Dept Meeting','Open Dept Meetings')}${action('subject','Theory of Knowledge','Open ToK')}</div>`;
+}
+
+function eventWeight(ev) {
+  const weeks = String(ev.weeks || '');
+  if (!weeks) return 1;
+  if (/^[01]+$/.test(weeks) && weeks.length > 1) {
+    const active = (weeks.match(/1/g) || []).length;
+    return active ? active / weeks.length : 0;
+  }
+  return 1;
+}
+function fmtHours(value) {
+  const n = Number(value || 0);
+  if (Math.abs(n - Math.round(n)) < 0.05) return String(Math.round(n));
+  return n.toFixed(1).replace(/\.0$/, '');
+}
+function gradeLevelFromClass(className) {
+  const c = String(className || '').trim();
+  if (/career|\bCP\b/i.test(c)) return 'CP';
+  if (/^DP\s*1|^DP1/i.test(c)) return 'DP1';
+  if (/^DP\s*2|^DP2/i.test(c)) return 'DP2';
+  const m = c.match(/^(\d{1,2})[A-Za-z]?/);
+  if (m) return `G${m[1]}`;
+  return c || 'Other';
+}
+function sectionLabelForEvent(ev, className) {
+  const related = (ev.groupByClass || []).filter(g => g.className === className || (!g.className && ev.classes.includes(className))).map(g => g.name).filter(Boolean);
+  const cleanGroups = uniq(related).filter(g => g && g !== 'Entire class' && g !== className);
+  if (!cleanGroups.length) return className;
+  const compactGroups = compactList(cleanGroups, 2).join(', ');
+  return `${className}: ${compactGroups}`;
+}
+function summarizeMap(map, maxItems=8) {
+  return Array.from(map.values()).sort((a,b) => b.hours - a.hours || a.name.localeCompare(b.name, undefined, {numeric:true})).slice(0, maxItems);
+}
+function buildTeacherAllocationRows() {
+  return (DATA.selectors.teacher || []).map(teacher => {
+    const evs = DATA.events.filter(ev => ev.teacherIds.includes(teacher.id));
+    const subjects = new Map();
+    const grades = new Map();
+    const rooms = new Set();
+    let total = 0;
+    for (const ev of evs) {
+      const weight = eventWeight(ev);
+      total += weight;
+      const subjectName = ev.subject || 'Unassigned subject';
+      if (!subjects.has(subjectName)) subjects.set(subjectName, { name: subjectName, hours: 0, classes: new Set() });
+      const subjectItem = subjects.get(subjectName);
+      subjectItem.hours += weight;
+      ev.classes.forEach(c => subjectItem.classes.add(c));
+      ev.rooms.forEach(r => rooms.add(r));
+      const classList = ev.classes.length ? ev.classes : ['Unassigned'];
+      const share = classList.length ? weight / classList.length : weight;
+      for (const className of classList) {
+        const grade = gradeLevelFromClass(className);
+        if (!grades.has(grade)) grades.set(grade, { name: grade, hours: 0, sections: new Set() });
+        const gradeItem = grades.get(grade);
+        gradeItem.hours += share;
+        gradeItem.sections.add(sectionLabelForEvent(ev, className));
+      }
+    }
+    const subjectSummary = summarizeMap(subjects).map(item => ({ name:item.name, hours:item.hours, classes:Array.from(item.classes).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true})) }));
+    const gradeSummary = summarizeMap(grades).map(item => ({ name:item.name, hours:item.hours, sections:compactList(Array.from(item.sections).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true})), 8) }));
+    const rowText = [teacher.name, fmtHours(total), ...subjectSummary.map(s=>`${s.name} ${fmtHours(s.hours)}`), ...gradeSummary.map(g=>`${g.name} ${g.sections.join(' ')}`), ...rooms].join(' ').toLowerCase();
+    return { teacher, events: evs, total, subjectSummary, gradeSummary, rooms:Array.from(rooms).sort(), rowText };
+  }).filter(row => row.events.length || row.total > 0);
+}
+function allocationSubjectHtml(items) {
+  return `<div class="alloc-stack">${items.map(item => `<span class="alloc-pill"><strong>${esc(item.name)}:</strong> ${esc(fmtHours(item.hours))}h</span>`).join('') || '<span class="alloc-muted">No subject allocation</span>'}</div>`;
+}
+function allocationGradeHtml(items) {
+  return `<div class="alloc-stack">${items.map(item => `<span class="alloc-pill"><strong>${esc(item.name)}:</strong> ${esc(item.sections.join(', '))} · ${esc(fmtHours(item.hours))}h</span>`).join('') || '<span class="alloc-muted">No grade allocation</span>'}</div>`;
+}
+function getFilteredAllocationRows() {
+  let rows = buildTeacherAllocationRows();
+  const q = String(allocationSearch?.value || '').trim().toLowerCase();
+  const band = allocationLoadFilter?.value || 'all';
+  const sort = allocationSort?.value || 'teacher';
+  if (q) rows = rows.filter(row => row.rowText.includes(q));
+  if (band === 'light') rows = rows.filter(row => row.total <= 16);
+  if (band === 'standard') rows = rows.filter(row => row.total > 16 && row.total < 25);
+  if (band === 'heavy') rows = rows.filter(row => row.total >= 25);
+  if (sort === 'hours-desc') rows.sort((a,b) => b.total - a.total || a.teacher.name.localeCompare(b.teacher.name));
+  else if (sort === 'hours-asc') rows.sort((a,b) => a.total - b.total || a.teacher.name.localeCompare(b.teacher.name));
+  else rows.sort((a,b) => a.teacher.name.localeCompare(b.teacher.name, undefined, {numeric:true}));
+  return rows;
+}
+function renderAllocationSummary(rows) {
+  if (!allocationSummary) return;
+  const allRows = buildTeacherAllocationRows();
+  const totals = allRows.map(r => r.total).filter(Number.isFinite);
+  const avg = totals.length ? totals.reduce((a,b)=>a+b,0) / totals.length : 0;
+  const heavy = allRows.filter(r => r.total >= 25).length;
+  const light = allRows.filter(r => r.total <= 16).length;
+  allocationSummary.innerHTML = [
+    ['Teachers shown', rows.length, 'After current filters'],
+    ['Teachers with load', allRows.length, 'Scheduled in XML'],
+    ['Average hours', fmtHours(avg), 'Average weekly estimate'],
+    ['25+ hours', heavy, 'High allocation band'],
+    ['≤16 hours', light, 'Reduced allocation band']
+  ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+}
+function renderTeacherAllocations() {
+  if (!teacherAllocationTable) return;
+  const rows = getFilteredAllocationRows();
+  renderAllocationSummary(rows);
+  if (!rows.length) {
+    teacherAllocationTable.innerHTML = '<tbody><tr><td class="allocation-empty">No teacher allocations match the current filters.</td></tr></tbody>';
+    return;
+  }
+  teacherAllocationTable.innerHTML = `<thead><tr><th>Teacher</th><th>Total hours</th><th>Subjects with hours</th><th>Grade levels, sections and hours</th><th>Rooms</th></tr></thead><tbody>${rows.map(row => `<tr>
+    <td class="allocation-teacher">${esc(row.teacher.name)}</td>
+    <td><div class="allocation-hours">${esc(fmtHours(row.total))}h</div><div class="alloc-muted">${row.events.length} XML card${row.events.length === 1 ? '' : 's'}</div></td>
+    <td>${allocationSubjectHtml(row.subjectSummary)}</td>
+    <td>${allocationGradeHtml(row.gradeSummary)}</td>
+    <td>${row.rooms.length ? `<div class="alloc-stack">${compactList(row.rooms, 10).map(room => `<span class="alloc-pill">${esc(room)}</span>`).join('')}</div>` : '<span class="alloc-muted">No room data</span>'}</td>
+  </tr>`).join('')}</tbody>`;
+}
+function allocationCsvEscape(v) { return csvEscape(v); }
+function downloadAllocationCsv() {
+  const rows = [['Teacher','Total hours','Subjects with hours','Grade levels, sections and hours','Rooms']];
+  for (const row of getFilteredAllocationRows()) {
+    rows.push([
+      row.teacher.name,
+      `${fmtHours(row.total)}h`,
+      row.subjectSummary.map(s => `${s.name}: ${fmtHours(s.hours)}h`).join('; '),
+      row.gradeSummary.map(g => `${g.name}: ${g.sections.join(', ')} (${fmtHours(g.hours)}h)`).join('; '),
+      row.rooms.join('; ')
+    ]);
+  }
+  const csv = rows.map(r => r.map(allocationCsvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'teacher_allocation_secondary_timetable_2026_2027_v3.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+allocationSearch?.addEventListener('input', renderTeacherAllocations);
+allocationLoadFilter?.addEventListener('change', renderTeacherAllocations);
+allocationSort?.addEventListener('change', renderTeacherAllocations);
+downloadAllocationCsvButton?.addEventListener('click', downloadAllocationCsv);
+
+function renderEvidenceBlocks() {
+  document.querySelectorAll('.visual-demo').forEach(el => {
+    const type = el.dataset.demo;
+    if (type === 'g6-g10-maths') renderG6G10Maths(el);
+    if (type === 'dp2-maths') renderDP2Maths(el);
+    if (type === 'staff-loads') renderStaffLoads(el);
+    if (type === 'dp1-demand') renderDP1Demand(el);
+    if (type === 'languages') renderLanguages(el);
+    if (type === 'myp-connected-tok') renderMypConnectedTok(el);
+    if (type === 'provisional') renderProvisional(el);
+  });
+}
+
+
+function updateSourceUi() {
+  const config = sourceConfig();
+  if (sourceProfile && sourceProfile.value !== activeSourceKey) sourceProfile.value = activeSourceKey;
+  document.title = config.title;
+  if (pageTitle) pageTitle.textContent = config.title;
+  if (pageIntro) pageIntro.textContent = config.intro;
+  if (releaseChip) releaseChip.textContent = config.release;
+  const secondaryOnly = activeSourceKey === 'secondary';
+  document.querySelectorAll('[data-secondary-only="true"]').forEach(el => el.classList.toggle('hidden', !secondaryOnly));
+  const activeSection = document.querySelector('.page-section.active');
+  if (!secondaryOnly && activeSection?.dataset.secondaryOnly === 'true') setActiveSection('timetableSection');
+}
+async function refreshAfterDataLoad(keepSelection=false) {
+  updateSourceUi();
+  populateSelect(keepSelection);
+  render();
+  renderTeacherAllocations();
+  renderEvidenceBlocks();
+}
+async function initViewer() {
+  const xmlFile = document.getElementById('xmlFile');
+  const reloadXml = document.getElementById('reloadXml');
+  const copyXmlName = document.getElementById('copyXmlName');
+
+  updateSourceUi();
+  sourceProfile?.addEventListener('change', async event => {
+    activeSourceKey = event.target.value || 'secondary';
+    state.view = 'class';
+    state.id = null;
+    if (DATA_CACHE.has(activeSourceKey)) {
+      DATA = DATA_CACHE.get(activeSourceKey);
+      setXmlStatus(`<strong>${esc(sourceConfig().label)} restored:</strong> ${esc(DATA.meta.sourceXml || 'cached XML')} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+    } else {
+      await loadXmlFromDefault();
+    }
+    await refreshAfterDataLoad(false);
+  });
+
+  xmlFile?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await loadXmlFromFile(file);
+      await refreshAfterDataLoad(false);
+    } catch (err) {
+      setXmlStatus(`Could not load selected XML: ${esc(err.message || err)}`, true);
+    }
+  });
+  reloadXml?.addEventListener('click', async () => {
+    await loadXmlFromDefault();
+    await refreshAfterDataLoad(true);
+  });
+  copyXmlName?.addEventListener('click', async () => {
+    const expected = expectedXmlFilename();
+    try {
+      await navigator.clipboard.writeText(expected);
+      setXmlStatus(`Copied expected ${esc(sourceConfig().label)} filename: <strong>${esc(expected)}</strong>`);
+    } catch {
+      setXmlStatus(`Expected ${esc(sourceConfig().label)} filename: <strong>${esc(expected)}</strong>`);
+    }
+  });
+
+  await loadXmlFromDefault();
+  await refreshAfterDataLoad(false);
+}
+initViewer();
+</script>
+</body>
+</html>
