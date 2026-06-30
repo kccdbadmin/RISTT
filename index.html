@@ -357,6 +357,16 @@
     <div class="release-panel">
       <div class="release-grid">
         <article class="release-card">
+          <h2>Secondary Timetable 2026-2027 V4.1</h2>
+          <p>This release corrects the daily schedule shown in the viewer. Period 1 now starts at <strong>7:45</strong>, and the former combined Mentor/Break block is split into <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>. A new Daily schedule tab shows the full bell schedule.</p>
+          <div class="pill-row">
+            <span class="pill">P1 starts 7:45</span>
+            <span class="pill">Mentor 9:45&ndash;10:00</span>
+            <span class="pill">Break 10:00&ndash;10:20</span>
+            <span class="pill">Daily schedule tab</span>
+          </div>
+        </article>
+        <article class="release-card">
           <h2>Secondary Timetable 2026-2027 V4</h2>
           <p>This release focuses on making the timetable clearer for staff: cleaner cards, visible teachers and rooms, a KCC-branded page header, and an all-teacher allocation report.</p>
           <div class="pill-row">
@@ -407,11 +417,11 @@
           </ul>
         </article>
         <article class="release-card">
-          <h3>Tuesday 30 June changes</h3>
+          <h3>V4.1 &middot; Tuesday 30 June changes</h3>
           <ul class="change-list">
-            <li>Added a <strong>Daily schedule</strong> tab showing the full secondary bell schedule.</li>
+            <li>Corrected the period times shown in the timetable viewer so <strong>Period 1 starts at 7:45</strong> and <strong>Period 2 runs 8:45&ndash;9:45</strong> (the viewer previously showed the old 8:00 start from the XML).</li>
             <li>Split the former combined Mentor/Break block into separate slots: <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>.</li>
-            <li>Confirmed Period 1 starts at <strong>7:45</strong>.</li>
+            <li>Added a <strong>Daily schedule</strong> tab showing the full secondary bell schedule.</li>
           </ul>
         </article>
       </div>
@@ -577,7 +587,7 @@
 const TIMETABLE_SOURCES = {
   secondary: {
     label: 'Secondary',
-    title: 'Secondary Timetable 2026-2027 V4',
+    title: 'Secondary Timetable 2026-2027 V4.1',
     release: '2026–2027 · Secondary XML',
     intro: 'Secondary timetable viewer hydrated from an aSc XML export. Replace the secondary XML file beside this HTML file, or load it manually.',
     candidates: ['secondary-timetable.xml', 'timetable.xml', 'Secondary XML with CP.xml', 'Secondary V3 with CP.xml']
@@ -589,6 +599,16 @@ const TIMETABLE_SOURCES = {
     intro: 'Primary timetable viewer hydrated from an aSc XML export. Replace the primary XML file beside this HTML file, or load it manually.',
     candidates: ['primary-timetable.xml', 'Primary timetable.xml', 'Primary XML.xml', 'Primary.xml', 'primary.xml']
   }
+};
+// Secondary bell-schedule override (V4.1): keeps the viewer's period header times
+// correct even if the loaded XML still carries the old start/end times.
+const SECONDARY_PERIOD_TIMES = {
+  '1': { starttime: '7:45', endtime: '8:45' },
+  '2': { starttime: '8:45', endtime: '9:45' },
+  '3': { starttime: '10:20', endtime: '11:20' },
+  '4': { starttime: '11:20', endtime: '12:20' },
+  '5': { starttime: '13:00', endtime: '14:00' },
+  '6': { starttime: '14:00', endtime: '15:00' }
 };
 let activeSourceKey = 'secondary';
 let DATA = createEmptyData(activeSourceKey);
@@ -704,6 +724,13 @@ function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceK
     starttime: attr(p,'starttime'),
     endtime: attr(p,'endtime')
   })).sort((a,b) => Number(a.period) - Number(b.period));
+
+  if (sourceKey === 'secondary') {
+    periods.forEach(p => {
+      const override = SECONDARY_PERIOD_TIMES[p.period];
+      if (override) { p.starttime = override.starttime; p.endtime = override.endtime; }
+    });
+  }
 
   const periodMap = new Map(periods.map(p => [p.period, p]));
   const subjectMap = makeMap(subjectNodes);
