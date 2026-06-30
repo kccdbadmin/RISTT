@@ -162,6 +162,14 @@
     .change-list { display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; }
     .change-list li { display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start; border:1px solid #e5ecf3; border-radius:14px; padding:11px 12px; background:#fbfcfe; color:#2f3b4a; line-height:1.42; }
     .change-list li::before { content:'✓'; display:inline-grid; place-items:center; width:22px; height:22px; border-radius:999px; background:#e9f7f0; color:#0d6848; font-weight:900; }
+    .schedule-table { width:100%; border-collapse:separate; border-spacing:0; margin-top:12px; font-size:14px; }
+    .schedule-table th, .schedule-table td { text-align:left; padding:10px 12px; border-bottom:1px solid #e5ecf3; }
+    .schedule-table thead th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    .schedule-table tbody tr:last-child td { border-bottom:none; }
+    .schedule-table .slot-name { font-weight:800; color:var(--ink); }
+    .schedule-table .slot-time { font-variant-numeric:tabular-nums; color:#3b4656; }
+    .schedule-table tr.is-break { background:#fbfcfe; }
+    .schedule-table tr.is-break .slot-name { color:#0d6848; }
     .allocation-header { display:grid; grid-template-columns:1fr minmax(220px,.55fr) minmax(180px,.35fr) auto; gap:12px; align-items:end; margin:14px 0; }
     .allocation-toolbar-note { color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px; }
     .allocation-wrap { max-height:calc(100vh - 230px); }
@@ -219,6 +227,7 @@
 <main>
   <nav class="tab-nav" aria-label="Viewer sections">
     <button class="tab-btn" data-section="timetableSection" aria-selected="true">Timetable viewer</button>
+    <button class="tab-btn" data-section="scheduleSection" data-secondary-only="true" aria-selected="false">Daily schedule</button>
     <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
@@ -396,6 +405,47 @@
             <li>Added "Laiyla" to replace Erik</li>
             <li>Added "Katrina" to replace Kim</li>
           </ul>
+        </article>
+        <article class="release-card">
+          <h3>Tuesday 30 June changes</h3>
+          <ul class="change-list">
+            <li>Added a <strong>Daily schedule</strong> tab showing the full secondary bell schedule.</li>
+            <li>Split the former combined Mentor/Break block into separate slots: <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>.</li>
+            <li>Confirmed Period 1 starts at <strong>7:45</strong>.</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="scheduleSection" class="page-section" data-secondary-only="true" aria-label="Daily schedule">
+    <div class="release-panel">
+      <div class="release-grid">
+        <article class="release-card">
+          <h2>Daily schedule</h2>
+          <p>The standard secondary bell schedule. Period 1 begins at 7:45. Mentor time and the morning break are separate slots: mentor runs 9:45&ndash;10:00 and break runs 10:00&ndash;10:20.</p>
+          <div class="pill-row">
+            <span class="pill">P1 starts 7:45</span>
+            <span class="pill">Mentor 9:45&ndash;10:00</span>
+            <span class="pill">Break 10:00&ndash;10:20</span>
+          </div>
+        </article>
+        <article class="release-card">
+          <h3>Bell schedule</h3>
+          <table class="schedule-table">
+            <thead><tr><th>Slot</th><th>Time</th></tr></thead>
+            <tbody>
+              <tr><td class="slot-name">Period 1</td><td class="slot-time">7:45&ndash;8:45</td></tr>
+              <tr><td class="slot-name">Period 2</td><td class="slot-time">8:45&ndash;9:45</td></tr>
+              <tr class="is-break"><td class="slot-name">Mentor time</td><td class="slot-time">9:45&ndash;10:00</td></tr>
+              <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">10:00&ndash;10:20</td></tr>
+              <tr><td class="slot-name">Period 3</td><td class="slot-time">10:20&ndash;11:20</td></tr>
+              <tr><td class="slot-name">Period 4</td><td class="slot-time">11:20&ndash;12:20</td></tr>
+              <tr class="is-break"><td class="slot-name">Lunch</td><td class="slot-time">12:20&ndash;13:00</td></tr>
+              <tr><td class="slot-name">Period 5</td><td class="slot-time">13:00&ndash;14:00</td></tr>
+              <tr><td class="slot-name">Period 6</td><td class="slot-time">14:00&ndash;15:00</td></tr>
+            </tbody>
+          </table>
         </article>
       </div>
     </div>
