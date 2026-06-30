@@ -48,13 +48,30 @@
     .viewer-title { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:18px 0 10px; }
     .viewer-title h2 { margin:0; font-size:24px; letter-spacing:-.03em; }
     .viewer-title .subtitle { color:var(--muted); font-size:13px; }
-    .table-wrap { overflow:auto; max-height:calc(100vh - 190px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
+    .table-wrap { overflow:auto; max-height:calc(100vh - 120px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
     table { width:100%; border-collapse:separate; border-spacing:0; min-width:980px; table-layout:fixed; }
     th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); vertical-align:top; }
     thead th { position:sticky; top:0; z-index:12; background:#f9fbfd; padding:10px; text-align:left; font-size:13px; box-shadow:0 1px 0 var(--line); }
     tbody th { background:#fbfcfe; width:118px; padding:10px; text-align:left; font-size:13px; position:sticky; left:0; z-index:8; }
     tbody th .period { font-size:18px; font-weight:800; }
     tbody th .time { color:var(--muted); font-size:12px; margin-top:2px; }
+    .grid-heading { margin:18px 0 8px; font-size:16px; letter-spacing:-.02em; display:flex; align-items:baseline; gap:10px; }
+    .grid-heading--fri { color:#9a4708; }
+    .grid-heading-note { font-size:12px; font-weight:600; color:var(--muted); }
+    .grids-row { display:flex; gap:16px; align-items:flex-start; }
+    .grid-col { min-width:0; }
+    .grid-col--main { flex:1 1 auto; }
+    .grid-col--fri { flex:0 0 360px; }
+    #ttFridayTable { min-width:300px; }
+    #ttFridayTable .card { max-width:100%; }
+    @media (max-width:1100px) { .grids-row { flex-direction:column; } .grid-col--fri { flex:1 1 auto; width:100%; align-self:stretch; } }
+    tr.slot-row th, tr.slot-row td { background:#f6f8fb; }
+    tr.slot-row th .period { font-size:14px; }
+    .slot-cell { font-weight:800; font-size:13px; padding:4px; }
+    tr.slot-row.mentor th, tr.slot-row.mentor td { background:#f2fbf6; }
+    tr.slot-row.mentor th .period, tr.slot-row.mentor .slot-cell { color:#0d6848; }
+    tr.slot-row.recess th, tr.slot-row.recess td { background:#fff6ee; }
+    tr.slot-row.recess th .period, tr.slot-row.recess .slot-cell { color:#9a4708; }
     td { height:112px; width:18%; padding:6px; background:white; }
     tr:last-child th, tr:last-child td { border-bottom:0; }
     th:last-child, td:last-child { border-right:0; }
@@ -170,6 +187,10 @@
     .schedule-table .slot-time { font-variant-numeric:tabular-nums; color:#3b4656; }
     .schedule-table tr.is-break { background:#fbfcfe; }
     .schedule-table tr.is-break .slot-name { color:#0d6848; }
+    .schedule-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width:720px) { .schedule-pair { grid-template-columns:1fr; } }
+    .schedule-subhead { margin:6px 0 0; font-size:13px; font-weight:800; color:var(--ink); }
+    .schedule-subhead.is-friday { color:#b4530a; }
     .allocation-header { display:grid; grid-template-columns:1fr minmax(220px,.55fr) minmax(180px,.35fr) auto; gap:12px; align-items:end; margin:14px 0; }
     .allocation-toolbar-note { color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px; }
     .allocation-wrap { max-height:calc(100vh - 230px); }
@@ -227,7 +248,7 @@
 <main>
   <nav class="tab-nav" aria-label="Viewer sections">
     <button class="tab-btn" data-section="timetableSection" aria-selected="true">Timetable viewer</button>
-    <button class="tab-btn" data-section="scheduleSection" data-secondary-only="true" aria-selected="false">Daily schedule</button>
+    <button class="tab-btn" data-section="scheduleSection" aria-selected="false">Daily schedule</button>
     <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
@@ -293,8 +314,6 @@
     <div class="status-line" id="xmlStatus">Loading XML…</div>
   </section>
 
-  <section class="summary" id="summary"></section>
-
   <section class="viewer-title">
     <div>
       <h2 id="activeTitle">Timetable</h2>
@@ -303,9 +322,23 @@
     <div class="subtitle" id="sourceNote"></div>
   </section>
 
-  <section class="table-wrap">
-    <table id="ttTable" aria-label="Timetable grid"></table>
-  </section>
+  <div class="grids-row">
+    <div class="grid-col grid-col--main">
+      <h3 class="grid-heading">Monday&ndash;Thursday</h3>
+      <section class="table-wrap">
+        <table id="ttTable" aria-label="Timetable grid (Monday to Thursday)"></table>
+      </section>
+    </div>
+    <div class="grid-col grid-col--fri" id="fridayCol">
+      <h3 class="grid-heading grid-heading--fri">Friday <span class="grid-heading-note">shortened day &middot; no mentor</span></h3>
+      <section class="table-wrap">
+        <table id="ttFridayTable" aria-label="Friday timetable grid"></table>
+      </section>
+    </div>
+  </div>
+
+  <h3 class="grid-heading">Dashboard</h3>
+  <section class="summary" id="summary"></section>
 
   <div class="notice">
     Notes: This viewer loads a selected timetable from an external aSc XML file. On GitHub Pages, keep this HTML file beside the XML files named in the source selector. Replace the relevant XML whenever the timetable changes. Simple cards show subject, unique group/class labels, teacher names and rooms where available; tick Detailed view to add fuller metadata and week labels. Student records in the XML are ignored.
@@ -357,12 +390,30 @@
     <div class="release-panel">
       <div class="release-grid">
         <article class="release-card">
+          <h2>Secondary Timetable 2026-2027 V4.2</h2>
+          <p>This release places the <strong>Monday&ndash;Thursday</strong> and <strong>Friday</strong> grids <strong>side by side</strong> in the Timetable viewer, so each day&rsquo;s times are clear at a glance without scrolling between stacked tables. On narrow screens the two grids stack automatically.</p>
+          <div class="pill-row">
+            <span class="pill">Side-by-side grids</span>
+            <span class="pill">Mon&ndash;Thu + Friday</span>
+            <span class="pill">Responsive layout</span>
+          </div>
+        </article>
+        <article class="release-card">
+          <h3>V4.2 &middot; Tuesday 30 June changes</h3>
+          <ul class="change-list">
+            <li>Placed the <strong>Monday&ndash;Thursday</strong> and <strong>Friday</strong> timetable grids <strong>side by side</strong> (previously stacked vertically).</li>
+            <li>Each grid keeps its own period boxes and times; the Friday grid remains mentor-free with its shortened periods.</li>
+            <li>Grids stack vertically on narrow screens so nothing is squashed.</li>
+          </ul>
+        </article>
+        <article class="release-card">
           <h2>Secondary Timetable 2026-2027 V4.1</h2>
-          <p>This release corrects the daily schedule shown in the viewer. Period 1 now starts at <strong>7:45</strong>, and the former combined Mentor/Break block is split into <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>. A new Daily schedule tab shows the full bell schedule.</p>
+          <p>This release corrects the daily schedule shown in the viewer. Period 1 now starts at <strong>7:45</strong>, and the former combined Mentor/Break block is split into <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>. A new Daily schedule tab shows the full bell schedule for <strong>both divisions</strong>, including the shortened <strong>Friday</strong> timings.</p>
           <div class="pill-row">
             <span class="pill">P1 starts 7:45</span>
             <span class="pill">Mentor 9:45&ndash;10:00</span>
             <span class="pill">Break 10:00&ndash;10:20</span>
+            <span class="pill">Friday schedule</span>
             <span class="pill">Daily schedule tab</span>
           </div>
         </article>
@@ -421,41 +472,101 @@
           <ul class="change-list">
             <li>Corrected the period times shown in the timetable viewer so <strong>Period 1 starts at 7:45</strong> and <strong>Period 2 runs 8:45&ndash;9:45</strong> (the viewer previously showed the old 8:00 start from the XML).</li>
             <li>Split the former combined Mentor/Break block into separate slots: <strong>Mentor time 9:45&ndash;10:00</strong> and <strong>Break 10:00&ndash;10:20</strong>.</li>
-            <li>Added a <strong>Daily schedule</strong> tab showing the full secondary bell schedule.</li>
+            <li>Added a <strong>Daily schedule</strong> tab showing the full bell schedule.</li>
+            <li>Expanded the Daily schedule tab to cover <strong>both Primary and Secondary</strong>, each with separate <strong>Monday&ndash;Thursday and Friday</strong> bell times (Friday is a shortened day).</li>
+            <li>Split the Timetable viewer into two separate grids: a <strong>Monday&ndash;Thursday</strong> grid and a dedicated <strong>Friday</strong> grid, so each day&rsquo;s times are unambiguous.</li>
+            <li>The Monday&ndash;Thursday grid includes <strong>Mentor</strong> (9:45&ndash;10:00), <strong>Break</strong> (10:00&ndash;10:20) and <strong>Lunch</strong> (12:20&ndash;13:00) rows.</li>
+            <li>The Friday grid uses Friday&rsquo;s shortened period times with a <strong>Break</strong> (10:15&ndash;10:30 Secondary, 9:45&ndash;10:00 Primary) and <strong>no mentor</strong>.</li>
           </ul>
         </article>
       </div>
     </div>
   </section>
 
-  <section id="scheduleSection" class="page-section" data-secondary-only="true" aria-label="Daily schedule">
+  <section id="scheduleSection" class="page-section" aria-label="Daily schedule">
     <div class="release-panel">
       <div class="release-grid">
         <article class="release-card">
           <h2>Daily schedule</h2>
-          <p>The standard secondary bell schedule. Period 1 begins at 7:45. Mentor time and the morning break are separate slots: mentor runs 9:45&ndash;10:00 and break runs 10:00&ndash;10:20.</p>
+          <p>Bell schedules for both divisions. Monday&ndash;Thursday run the standard timetable; <strong>Friday is a shortened day</strong> with its own period times. Break slots are shaded.</p>
           <div class="pill-row">
-            <span class="pill">P1 starts 7:45</span>
-            <span class="pill">Mentor 9:45&ndash;10:00</span>
-            <span class="pill">Break 10:00&ndash;10:20</span>
+            <span class="pill">Secondary P1 7:45</span>
+            <span class="pill">Friday shortened day</span>
+            <span class="pill">Primary &amp; Secondary</span>
+          </div>
+          <p style="margin-top:10px;color:var(--muted);font-size:12px;line-height:1.5;">The Timetable viewer now shows two separate grids: a <strong>Monday&ndash;Thursday</strong> grid (with Mentor, Break and Lunch rows) and a dedicated <strong>Friday</strong> grid using Friday&rsquo;s own shortened times (no mentor). This tab is the at-a-glance reference.</p>
+        </article>
+        <article class="release-card">
+          <h3>Secondary</h3>
+          <div class="schedule-pair">
+            <div>
+              <h4 class="schedule-subhead">Monday&ndash;Thursday</h4>
+              <table class="schedule-table">
+                <thead><tr><th>Slot</th><th>Time</th></tr></thead>
+                <tbody>
+                  <tr><td class="slot-name">Period 1</td><td class="slot-time">7:45&ndash;8:45</td></tr>
+                  <tr><td class="slot-name">Period 2</td><td class="slot-time">8:45&ndash;9:45</td></tr>
+                  <tr class="is-break"><td class="slot-name">Mentor time</td><td class="slot-time">9:45&ndash;10:00</td></tr>
+                  <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">10:00&ndash;10:20</td></tr>
+                  <tr><td class="slot-name">Period 3</td><td class="slot-time">10:20&ndash;11:20</td></tr>
+                  <tr><td class="slot-name">Period 4</td><td class="slot-time">11:20&ndash;12:20</td></tr>
+                  <tr class="is-break"><td class="slot-name">Lunch</td><td class="slot-time">12:20&ndash;13:00</td></tr>
+                  <tr><td class="slot-name">Period 5</td><td class="slot-time">13:00&ndash;14:00</td></tr>
+                  <tr><td class="slot-name">Period 6</td><td class="slot-time">14:00&ndash;15:00</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <h4 class="schedule-subhead is-friday">Friday</h4>
+              <table class="schedule-table">
+                <thead><tr><th>Slot</th><th>Time</th></tr></thead>
+                <tbody>
+                  <tr><td class="slot-name">Period 1</td><td class="slot-time">7:45&ndash;8:15</td></tr>
+                  <tr><td class="slot-name">Period 2</td><td class="slot-time">8:15&ndash;9:15</td></tr>
+                  <tr><td class="slot-name">Period 3</td><td class="slot-time">9:15&ndash;10:15</td></tr>
+                  <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">10:15&ndash;10:30</td></tr>
+                  <tr><td class="slot-name">Period 4</td><td class="slot-time">10:30&ndash;11:30</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </article>
         <article class="release-card">
-          <h3>Bell schedule</h3>
-          <table class="schedule-table">
-            <thead><tr><th>Slot</th><th>Time</th></tr></thead>
-            <tbody>
-              <tr><td class="slot-name">Period 1</td><td class="slot-time">7:45&ndash;8:45</td></tr>
-              <tr><td class="slot-name">Period 2</td><td class="slot-time">8:45&ndash;9:45</td></tr>
-              <tr class="is-break"><td class="slot-name">Mentor time</td><td class="slot-time">9:45&ndash;10:00</td></tr>
-              <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">10:00&ndash;10:20</td></tr>
-              <tr><td class="slot-name">Period 3</td><td class="slot-time">10:20&ndash;11:20</td></tr>
-              <tr><td class="slot-name">Period 4</td><td class="slot-time">11:20&ndash;12:20</td></tr>
-              <tr class="is-break"><td class="slot-name">Lunch</td><td class="slot-time">12:20&ndash;13:00</td></tr>
-              <tr><td class="slot-name">Period 5</td><td class="slot-time">13:00&ndash;14:00</td></tr>
-              <tr><td class="slot-name">Period 6</td><td class="slot-time">14:00&ndash;15:00</td></tr>
-            </tbody>
-          </table>
+          <h3>Primary</h3>
+          <div class="schedule-pair">
+            <div>
+              <h4 class="schedule-subhead">Monday&ndash;Thursday</h4>
+              <table class="schedule-table">
+                <thead><tr><th>Slot</th><th>Time</th></tr></thead>
+                <tbody>
+                  <tr><td class="slot-name">Period 1</td><td class="slot-time">8:20&ndash;9:00</td></tr>
+                  <tr><td class="slot-name">Period 2</td><td class="slot-time">9:00&ndash;9:40</td></tr>
+                  <tr><td class="slot-name">Period 3</td><td class="slot-time">9:40&ndash;10:20</td></tr>
+                  <tr><td class="slot-name">Period 4</td><td class="slot-time">10:20&ndash;11:00</td></tr>
+                  <tr><td class="slot-name">Period 5</td><td class="slot-time">11:00&ndash;11:40</td></tr>
+                  <tr><td class="slot-name">Period 6</td><td class="slot-time">11:40&ndash;12:20</td></tr>
+                  <tr><td class="slot-name">Period 7</td><td class="slot-time">12:20&ndash;13:00</td></tr>
+                  <tr><td class="slot-name">Period 8</td><td class="slot-time">13:00&ndash;13:30</td></tr>
+                  <tr><td class="slot-name">Period 9</td><td class="slot-time">13:30&ndash;14:10</td></tr>
+                  <tr><td class="slot-name">Period 10</td><td class="slot-time">14:10&ndash;14:50</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <h4 class="schedule-subhead is-friday">Friday</h4>
+              <table class="schedule-table">
+                <thead><tr><th>Slot</th><th>Time</th></tr></thead>
+                <tbody>
+                  <tr><td class="slot-name">Period 1</td><td class="slot-time">8:00&ndash;8:35</td></tr>
+                  <tr><td class="slot-name">Period 2</td><td class="slot-time">8:35&ndash;9:10</td></tr>
+                  <tr><td class="slot-name">Period 3</td><td class="slot-time">9:10&ndash;9:45</td></tr>
+                  <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">9:45&ndash;10:00</td></tr>
+                  <tr><td class="slot-name">Period 4</td><td class="slot-time">10:00&ndash;10:35</td></tr>
+                  <tr><td class="slot-name">Period 5</td><td class="slot-time">10:35&ndash;11:10</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </article>
       </div>
     </div>
@@ -587,7 +698,7 @@
 const TIMETABLE_SOURCES = {
   secondary: {
     label: 'Secondary',
-    title: 'Secondary Timetable 2026-2027 V4.1',
+    title: 'Secondary Timetable 2026-2027 V4.2',
     release: '2026–2027 · Secondary XML',
     intro: 'Secondary timetable viewer hydrated from an aSc XML export. Replace the secondary XML file beside this HTML file, or load it manually.',
     candidates: ['secondary-timetable.xml', 'timetable.xml', 'Secondary XML with CP.xml', 'Secondary V3 with CP.xml']
@@ -609,6 +720,37 @@ const SECONDARY_PERIOD_TIMES = {
   '4': { starttime: '11:20', endtime: '12:20' },
   '5': { starttime: '13:00', endtime: '14:00' },
   '6': { starttime: '14:00', endtime: '15:00' }
+};
+// Friday is a shortened day with its own period times, per division.
+// Periods not listed here do not run on Friday.
+const FRIDAY_KEY = '00001';
+// Monday–Thursday non-teaching slots, keyed by the period they follow (Secondary).
+const SECONDARY_INTERSTITIALS = {
+  '2': [
+    { label: 'Mentor', monThu: '9:45–10:00', accent: 'mentor' },
+    { label: 'Break', monThu: '10:00–10:20', accent: 'recess' }
+  ],
+  '4': [
+    { label: 'Lunch', monThu: '12:20–13:00', accent: 'recess' }
+  ]
+};
+// Friday is a shortened day with its own ordered structure (no mentor). Drives the separate Friday grid.
+const FRIDAY_SCHEDULE = {
+  secondary: [
+    { type: 'period', period: '1', time: '7:45–8:15' },
+    { type: 'period', period: '2', time: '8:15–9:15' },
+    { type: 'period', period: '3', time: '9:15–10:15' },
+    { type: 'slot', label: 'Break', time: '10:15–10:30', accent: 'recess' },
+    { type: 'period', period: '4', time: '10:30–11:30' }
+  ],
+  primary: [
+    { type: 'period', period: '1', time: '8:00–8:35' },
+    { type: 'period', period: '2', time: '8:35–9:10' },
+    { type: 'period', period: '3', time: '9:10–9:45' },
+    { type: 'slot', label: 'Break', time: '9:45–10:00', accent: 'recess' },
+    { type: 'period', period: '4', time: '10:00–10:35' },
+    { type: 'period', period: '5', time: '10:35–11:10' }
+  ]
 };
 let activeSourceKey = 'secondary';
 let DATA = createEmptyData(activeSourceKey);
@@ -923,6 +1065,7 @@ const entitySelect = document.getElementById('entitySelect');
 const weekFilter = document.getElementById('weekFilter');
 const detailToggle = document.getElementById('detailToggle');
 const table = document.getElementById('ttTable');
+const fridayTable = document.getElementById('ttFridayTable');
 const summary = document.getElementById('summary');
 const activeTitle = document.getElementById('activeTitle');
 const activeSubtitle = document.getElementById('activeSubtitle');
@@ -1017,7 +1160,7 @@ function cardHtml(ev) {
     <div class="meta">${lines.join('<br>')}</div>
   </div>`;
 }
-function renderTable() {
+function buildBySlot() {
   const events = filteredEvents();
   const bySlot = new Map();
   for (const ev of events) {
@@ -1028,17 +1171,55 @@ function renderTable() {
   for (const arr of bySlot.values()) {
     arr.sort((a,b) => (a.subject+a.classes.join(',')+a.teachers.join(',')).localeCompare(b.subject+b.classes.join(',')+b.teachers.join(','), undefined, {numeric:true}));
   }
-  let html = '<thead><tr><th>Period</th>' + DATA.days.map(d => `<th>${esc(d.name)}</th>`).join('') + '</tr></thead><tbody>';
+  return bySlot;
+}
+function renderTable() {
+  const bySlot = buildBySlot();
+  const isSecondary = activeSourceKey === 'secondary';
+  // Main grid is Monday–Thursday only; Friday has its own grid below.
+  const weekdays = DATA.days.filter(d => d.key !== FRIDAY_KEY);
+  let html = '<thead><tr><th>Period</th>' + weekdays.map(d => `<th>${esc(d.name)}</th>`).join('') + '</tr></thead><tbody>';
   for (const p of DATA.periods) {
     html += `<tr><th><div class="period">P${esc(p.period)}</div><div class="time">${esc(p.starttime)}–${esc(p.endtime)}</div></th>`;
-    for (const d of DATA.days) {
+    for (const d of weekdays) {
       const arr = bySlot.get(`${d.key}|${p.period}`) || [];
       html += `<td>${arr.length ? arr.map(cardHtml).join('') : '<div class="cell-empty">No lesson</div>'}</td>`;
     }
     html += '</tr>';
+    // Non-teaching slots (Mentor, Break, Lunch) shown as rows, Secondary only.
+    if (isSecondary && SECONDARY_INTERSTITIALS[p.period]) {
+      for (const slot of SECONDARY_INTERSTITIALS[p.period]) {
+        html += `<tr class="slot-row ${slot.accent}"><th><div class="period">${esc(slot.label)}</div><div class="time">${esc(slot.monThu)}</div></th>`;
+        for (const d of weekdays) html += `<td><div class="slot-cell">${esc(slot.label)}</div></td>`;
+        html += '</tr>';
+      }
+    }
   }
   html += '</tbody>';
   table.innerHTML = html;
+  renderFridayTable(bySlot);
+}
+function renderFridayTable(bySlot) {
+  const schedule = FRIDAY_SCHEDULE[activeSourceKey];
+  const col = document.getElementById('fridayCol');
+  if (!schedule) {
+    if (col) col.style.display = 'none';
+    fridayTable.innerHTML = '';
+    return;
+  }
+  if (col) col.style.display = '';
+  let html = '<thead><tr><th>Period</th><th>Friday</th></tr></thead><tbody>';
+  for (const item of schedule) {
+    if (item.type === 'period') {
+      const arr = bySlot.get(`${FRIDAY_KEY}|${item.period}`) || [];
+      html += `<tr><th><div class="period">P${esc(item.period)}</div><div class="time">${esc(item.time)}</div></th>`;
+      html += `<td>${arr.length ? arr.map(cardHtml).join('') : '<div class="cell-empty">No lesson</div>'}</td></tr>`;
+    } else {
+      html += `<tr class="slot-row ${item.accent || 'recess'}"><th><div class="period">${esc(item.label)}</div><div class="time">${esc(item.time)}</div></th><td><div class="slot-cell">${esc(item.label)}</div></td></tr>`;
+    }
+  }
+  html += '</tbody>';
+  fridayTable.innerHTML = html;
 }
 function isDepartmentMeeting(ev) {
   const haystack = [ev.subject, ev.subjectShort, ...ev.classes, ...ev.groups]
