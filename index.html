@@ -48,7 +48,7 @@
     .viewer-title { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:18px 0 10px; }
     .viewer-title h2 { margin:0; font-size:24px; letter-spacing:-.03em; }
     .viewer-title .subtitle { color:var(--muted); font-size:13px; }
-    .table-wrap { overflow:auto; max-height:calc(100vh - 120px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
+    .table-wrap { overflow:auto; max-width:100%; max-height:calc(100vh - 120px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
     table { width:100%; border-collapse:separate; border-spacing:0; min-width:980px; table-layout:fixed; }
     th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); vertical-align:top; }
     thead th { position:sticky; top:0; z-index:12; background:#f9fbfd; padding:10px; text-align:left; font-size:13px; box-shadow:0 1px 0 var(--line); }
@@ -59,7 +59,10 @@
     .grid-heading--fri { color:#9a4708; }
     .grid-heading-note { font-size:12px; font-weight:600; color:var(--muted); }
     .grids-row { display:flex; gap:16px; align-items:flex-start; }
-    .grid-col { min-width:0; }
+    /* min-width:0 alone does not stop the 980px-wide table sizing this flex item past its
+       container; max-width keeps the overflow inside .table-wrap's own scroller instead of
+       letting the whole page scroll sideways below ~1000px. */
+    .grid-col { min-width:0; max-width:100%; }
     .grid-col--main { flex:1 1 auto; }
     .grid-col--fri { flex:0 0 360px; }
     #ttFridayTable { min-width:300px; }
@@ -84,6 +87,9 @@
     .badge.b { background:#fff1f1; color:#a83232; }
     .meta { margin-top:5px; font-size:12px; color:#344054; line-height:1.3; }
     .meta strong { color:#1a2738; }
+    .card.non-teaching { border-color:#f0d9bd; border-left-color:#d98b3a; background:linear-gradient(180deg,#fff6ee,#fff); box-shadow:none; }
+    .card.non-teaching .subject { color:#9a4708; font-size:12px; }
+    .slot-asc { font-size:11px; font-weight:700; opacity:.7; }
     .card.compact { padding:5px 7px; margin-bottom:4px; border-left-width:4px; box-shadow:none; }
     .card.compact .topline { display:block; }
     .card.compact .subject { font-size:12px; line-height:1.12; }
@@ -98,8 +104,9 @@
 
     .xml-source { margin:12px 0 0; display:grid; grid-template-columns: .8fr 1.15fr auto auto 1.6fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:12px 14px; box-shadow:0 10px 30px rgba(15,35,55,.04); }
     input[type="file"] { width:100%; min-height:42px; border:1px dashed var(--line); border-radius:12px; background:#fff; color:var(--ink); font-size:13px; padding:9px 12px; }
-    .status-line { min-height:42px; display:flex; align-items:center; color:var(--muted); font-size:13px; line-height:1.35; }
+    .status-line { min-height:42px; display:flex; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:13px; line-height:1.35; }
     .status-line strong { color:var(--ink); }
+    .status-line strong.status-warn { color:#9a4708; }
 
     .tab-nav { display:flex; gap:10px; align-items:center; margin:0 0 14px; flex-wrap:wrap; }
     .tab-btn { height:42px; border:1px solid var(--line); border-radius:999px; background:white; color:var(--ink); font-weight:800; padding:0 16px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
@@ -494,7 +501,7 @@
             <span class="pill">Friday shortened day</span>
             <span class="pill">Primary &amp; Secondary</span>
           </div>
-          <p style="margin-top:10px;color:var(--muted);font-size:12px;line-height:1.5;">The Timetable viewer now shows two separate grids: a <strong>Monday&ndash;Thursday</strong> grid (with Mentor, Break and Lunch rows) and a dedicated <strong>Friday</strong> grid using Friday&rsquo;s own shortened times (no mentor). This tab is the at-a-glance reference.</p>
+          <p style="margin-top:10px;color:var(--muted);font-size:12px;line-height:1.5;">The Timetable viewer now shows two separate grids: a <strong>Monday&ndash;Thursday</strong> grid (Secondary adds Mentor, Break and Lunch rows; Primary carries break and lunch as timetabled cards) and a dedicated <strong>Friday</strong> grid using Friday&rsquo;s own shortened times (no mentor). This tab is the at-a-glance reference.</p>
         </article>
         <article class="release-card">
           <h3>Secondary</h3>
@@ -560,13 +567,15 @@
                   <tr><td class="slot-name">Period 1</td><td class="slot-time">8:00&ndash;8:35</td></tr>
                   <tr><td class="slot-name">Period 2</td><td class="slot-time">8:35&ndash;9:10</td></tr>
                   <tr><td class="slot-name">Period 3</td><td class="slot-time">9:10&ndash;9:45</td></tr>
-                  <tr class="is-break"><td class="slot-name">Break</td><td class="slot-time">9:45&ndash;10:00</td></tr>
-                  <tr><td class="slot-name">Period 4</td><td class="slot-time">10:00&ndash;10:35</td></tr>
-                  <tr><td class="slot-name">Period 5</td><td class="slot-time">10:35&ndash;11:10</td></tr>
+                  <tr class="is-break"><td class="slot-name">Break <span class="slot-asc">Period 4</span></td><td class="slot-time">9:45&ndash;10:00</td></tr>
+                  <tr><td class="slot-name">Period 5</td><td class="slot-time">10:00&ndash;10:35</td></tr>
+                  <tr><td class="slot-name">Period 6</td><td class="slot-time">10:35&ndash;11:10</td></tr>
+                  <tr class="is-break"><td class="slot-name">Pack up</td><td class="slot-time">11:10&ndash;11:30</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
+          <p style="margin-top:12px;color:var(--muted);font-size:12px;line-height:1.5;">Primary breaks and lunch are <strong>timetabled as periods</strong> rather than as separate bell events, so the period numbers above are the ones used in the timetable and its CSV export. Friday therefore runs <strong>five teaching periods</strong> numbered P1&ndash;P3 and P5&ndash;P6, with the 9:45 break occupying Period 4. Monday&ndash;Thursday, Grades 1&ndash;5 break at Period 4 and take lunch at Period 8; Early Years breaks at Periods 3 and 7; Mini classes have no timetabled break card.</p>
         </article>
       </div>
     </div>
@@ -735,23 +744,47 @@ const SECONDARY_INTERSTITIALS = {
   ]
 };
 // Friday is a shortened day with its own ordered structure (no mentor). Drives the separate Friday grid.
+//
+// `ascPeriod` is the period number as it appears in the aSc XML, and is what the row
+// pulls its cards from. It is deliberately NOT the row's position in this list: MYP and
+// PYP shape Friday differently.
+//   MYP (Secondary) — 4 teaching periods; the break is an aSc <break>, so it consumes no
+//                     period and row order happens to match the period numbers.
+//   PYP (Primary)   — 5 teaching periods, but PYP has no aSc <break> elements. Break and
+//                     lunch are scheduled as ordinary subject cards, so the 9:45 break
+//                     OCCUPIES aSc period 4 and the last two lessons are aSc periods 5
+//                     and 6. A slot row with an `ascPeriod` absorbs that period, which is
+//                     why primary skips from P3 to P5 below.
+// Any Friday aSc period carrying cards but missing here is reported by fridayCoverageWarning().
 const FRIDAY_SCHEDULE = {
   secondary: [
-    { type: 'period', period: '1', time: '7:45–8:15' },
-    { type: 'period', period: '2', time: '8:15–9:15' },
-    { type: 'period', period: '3', time: '9:15–10:15' },
+    { type: 'period', ascPeriod: '1', time: '7:45–8:15' },
+    { type: 'period', ascPeriod: '2', time: '8:15–9:15' },
+    { type: 'period', ascPeriod: '3', time: '9:15–10:15' },
     { type: 'slot', label: 'Break', time: '10:15–10:30', accent: 'recess' },
-    { type: 'period', period: '4', time: '10:30–11:30' }
+    { type: 'period', ascPeriod: '4', time: '10:30–11:30' }
   ],
   primary: [
-    { type: 'period', period: '1', time: '8:00–8:35' },
-    { type: 'period', period: '2', time: '8:35–9:10' },
-    { type: 'period', period: '3', time: '9:10–9:45' },
-    { type: 'slot', label: 'Break', time: '9:45–10:00', accent: 'recess' },
-    { type: 'period', period: '4', time: '10:00–10:35' },
-    { type: 'period', period: '5', time: '10:35–11:10' }
+    { type: 'period', ascPeriod: '1', time: '8:00–8:35' },
+    { type: 'period', ascPeriod: '2', time: '8:35–9:10' },
+    { type: 'period', ascPeriod: '3', time: '9:10–9:45' },
+    { type: 'slot', label: 'Break', time: '9:45–10:00', accent: 'recess', ascPeriod: '4' },
+    { type: 'period', ascPeriod: '5', time: '10:00–10:35' },
+    { type: 'period', ascPeriod: '6', time: '10:35–11:10' },
+    { type: 'slot', label: 'Pack up', time: '11:10–11:30', accent: 'recess' }
   ]
 };
+// Friday runs its own bell times, so a Friday card must not report the Monday–Thursday
+// times the XML carries against that period number. Feeds the CSV export and copy-summary
+// as well as the grid.
+function fridayTimeFor(sourceKey, period) {
+  const schedule = FRIDAY_SCHEDULE[sourceKey];
+  if (!schedule) return '';
+  // Slot rows are matched too, so a card in an absorbed period (the PYP Friday break)
+  // still reports its real Friday time in the CSV export.
+  const row = schedule.find(item => item.ascPeriod === period);
+  return row ? row.time : '';
+}
 let activeSourceKey = 'secondary';
 let DATA = createEmptyData(activeSourceKey);
 const DATA_CACHE = new Map();
@@ -961,7 +994,7 @@ function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceK
         day: day.name,
         dayShort: day.short,
         period,
-        time,
+        time: dayKey === FRIDAY_KEY ? (fridayTimeFor(sourceKey, period) || time) : time,
         weeks,
         weekLabel: weekLong,
         weekShort,
@@ -1027,6 +1060,62 @@ function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceK
   };
 }
 
+// Guard against the Friday grid silently dropping lessons. Every aSc period carrying
+// Friday cards must be claimed by exactly one FRIDAY_SCHEDULE row — either a teaching row
+// or a slot row that absorbs it. An unclaimed period renders nowhere, which is how 52
+// Primary Friday lessons went missing before this check existed.
+function fridayCoverageWarning(data, sourceKey) {
+  if (!data || !data.events || !data.events.length) return '';
+  const fridayEvents = data.events.filter(ev => ev.dayKey === FRIDAY_KEY);
+  if (!fridayEvents.length) return '';
+  const schedule = FRIDAY_SCHEDULE[sourceKey];
+  if (!schedule) {
+    return `${fridayEvents.length} Friday card${fridayEvents.length === 1 ? '' : 's'} cannot be shown: there is no FRIDAY_SCHEDULE entry for "${sourceKey}".`;
+  }
+  const problems = [];
+
+  // A period claimed by two rows would render its cards twice.
+  const claims = new Map();
+  for (const row of schedule) {
+    if (!row.ascPeriod) continue;
+    claims.set(row.ascPeriod, (claims.get(row.ascPeriod) || 0) + 1);
+  }
+  const duplicated = Array.from(claims.entries()).filter(([, n]) => n > 1).map(([p]) => p);
+  if (duplicated.length) {
+    problems.push(`period${duplicated.length === 1 ? '' : 's'} ${duplicated.join(', ')} ${duplicated.length === 1 ? 'is' : 'are'} claimed by more than one row, so those cards render twice`);
+  }
+
+  // A period carrying cards that no row claims renders nowhere.
+  const unclaimed = new Map();
+  for (const ev of fridayEvents) {
+    if (claims.has(ev.period)) continue;
+    unclaimed.set(ev.period, (unclaimed.get(ev.period) || 0) + 1);
+  }
+  if (unclaimed.size) {
+    const periods = Array.from(unclaimed.keys()).sort((a, b) => Number(a) - Number(b));
+    const lost = Array.from(unclaimed.values()).reduce((total, n) => total + n, 0);
+    problems.push(`period${periods.length === 1 ? '' : 's'} ${periods.join(', ')} carr${periods.length === 1 ? 'ies' : 'y'} ${lost} card${lost === 1 ? '' : 's'} that no row claims`);
+  }
+
+  // A slot row absorbs its period, hiding whatever sits there. That is correct for break
+  // and lunch, but a real lesson parked in an absorbed period would vanish without trace.
+  for (const row of schedule) {
+    if (row.type === 'period' || !row.ascPeriod) continue;
+    const hidden = fridayEvents.filter(ev => ev.period === row.ascPeriod && !isNonTeachingSlot(ev));
+    if (!hidden.length) continue;
+    const subjects = Array.from(new Set(hidden.map(ev => ev.subject))).slice(0, 3).join(', ');
+    problems.push(`the "${row.label}" row absorbs period ${row.ascPeriod}, hiding ${hidden.length} teaching card${hidden.length === 1 ? '' : 's'} (${subjects})`);
+  }
+
+  if (!problems.length) return '';
+  return `Friday grid: ${problems.join('; ')}. Check FRIDAY_SCHEDULE.${sourceKey}.`;
+}
+function fridayWarningHtml(data, sourceKey) {
+  const message = fridayCoverageWarning(data, sourceKey);
+  if (!message) return '';
+  console.warn('[timetable]', message);
+  return ` <strong class="status-warn">⚠ ${esc(message)}</strong>`;
+}
 function setXmlStatus(message, isError=false) {
   const el = document.getElementById('xmlStatus');
   if (!el) return;
@@ -1042,7 +1131,7 @@ async function loadXmlFromDefault() {
       const text = await response.text();
       DATA = parseAscXml(text, path, activeSourceKey);
       DATA_CACHE.set(activeSourceKey, DATA);
-      setXmlStatus(`<strong>${esc(config.label)} loaded:</strong> ${esc(path)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+      setXmlStatus(`<strong>${esc(config.label)} loaded:</strong> ${esc(path)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons${fridayWarningHtml(DATA, activeSourceKey)}`);
       return true;
     } catch (err) {}
   }
@@ -1056,7 +1145,7 @@ async function loadXmlFromFile(file) {
   const text = await file.text();
   DATA = parseAscXml(text, file.name, activeSourceKey);
   DATA_CACHE.set(activeSourceKey, DATA);
-  setXmlStatus(`<strong>${esc(config.label)} loaded manually:</strong> ${esc(file.name)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+  setXmlStatus(`<strong>${esc(config.label)} loaded manually:</strong> ${esc(file.name)} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons${fridayWarningHtml(DATA, activeSourceKey)}`);
   return true;
 }
 const state = { view:'class', id:null, week:'all', detailed:true };
@@ -1135,6 +1224,14 @@ function groupForSelectedClass(ev) {
 }
 function cardHtml(ev) {
   const subject = ev.subject || ev.subjectShort || 'Lesson';
+  // Break/lunch arrive as ordinary subject cards in PYP exports. Render them as a slot so
+  // they read as non-teaching time rather than as a lesson to be taught.
+  if (isNonTeachingSlot(ev)) {
+    // Keep the class visible outside class view, or a Break card in subject/teacher view
+    // would carry no identifying information at all.
+    const who = state.view !== 'class' && ev.classes.length ? `<div class="meta">${esc(ev.classes.join(', '))}</div>` : '';
+    return `<div class="card non-teaching"><div class="topline"><div class="subject">${esc(subject)}</div></div>${who}</div>`;
+  }
   const g = groupForSelectedClass(ev);
   const groupLine = g && g !== 'Entire class' ? `<strong>Group:</strong> ${esc(g)}` : '';
 
@@ -1211,20 +1308,38 @@ function renderFridayTable(bySlot) {
   let html = '<thead><tr><th>Period</th><th>Friday</th></tr></thead><tbody>';
   for (const item of schedule) {
     if (item.type === 'period') {
-      const arr = bySlot.get(`${FRIDAY_KEY}|${item.period}`) || [];
-      html += `<tr><th><div class="period">P${esc(item.period)}</div><div class="time">${esc(item.time)}</div></th>`;
+      // Cards are keyed by the aSc period number, which is not the row's position.
+      const arr = bySlot.get(`${FRIDAY_KEY}|${item.ascPeriod}`) || [];
+      html += `<tr><th><div class="period">P${esc(item.ascPeriod)}</div><div class="time">${esc(item.time)}</div></th>`;
       html += `<td>${arr.length ? arr.map(cardHtml).join('') : '<div class="cell-empty">No lesson</div>'}</td></tr>`;
     } else {
-      html += `<tr class="slot-row ${item.accent || 'recess'}"><th><div class="period">${esc(item.label)}</div><div class="time">${esc(item.time)}</div></th><td><div class="slot-cell">${esc(item.label)}</div></td></tr>`;
+      // A slot may absorb an aSc period (PYP schedules break as a card); label it so the
+      // gap in the period numbering is self-explanatory.
+      const absorbed = item.ascPeriod ? ` <span class="slot-asc">P${esc(item.ascPeriod)}</span>` : '';
+      html += `<tr class="slot-row ${item.accent || 'recess'}"><th><div class="period">${esc(item.label)}${absorbed}</div><div class="time">${esc(item.time)}</div></th><td><div class="slot-cell">${esc(item.label)}</div></td></tr>`;
     }
   }
   html += '</tbody>';
   fridayTable.innerHTML = html;
 }
-function isDepartmentMeeting(ev) {
+// Any scheduled meeting: "Dept Meeting" in the Secondary export, "Grade Level Meeting" in
+// the Primary one. Matching the bare word rather than only department meetings is what the
+// dashboard captions promise, and neither export has a taught subject containing "meeting".
+function isMeeting(ev) {
   const haystack = [ev.subject, ev.subjectShort, ...ev.classes, ...ev.groups]
     .map(v => String(v || '').toLowerCase()).join(' ');
-  return /\b(department|dept\.?|dep\.?)\s*(meeting|mtg)\b|\b(meeting|mtg)\s*(department|dept\.?|dep\.?)\b/.test(haystack);
+  return /\b(meeting|mtg)\b/.test(haystack);
+}
+// PYP has no aSc <break> elements: break and lunch are scheduled as ordinary subject
+// cards ("Break", "Lunch PYP"), so they arrive here as lessons. Treat them as slots, not
+// teaching. Matched on the subject name only — class and group names are deliberately not
+// consulted, so a real lesson is never suppressed because of what it sits next to.
+function isNonTeachingSlot(ev) {
+  return /^(break|lunch|recess|pack\s*up)\b/i.test(textClean(ev.subject || ev.subjectShort || ''));
+}
+// A card that should count toward a "lessons taught" total.
+function isCountableLesson(ev) {
+  return !isMeeting(ev) && !isNonTeachingSlot(ev);
 }
 function eventActiveInWeek(ev, week) {
   if (!ev.weeks || ev.weeks === '1' || ev.weeks === '11' || ev.weekShort === 'All') return true;
@@ -1280,7 +1395,7 @@ function subjectCountLabel(ev) {
 function subjectCountsForSummary(events) {
   const counts = new Map();
   for (const ev of events) {
-    if (isDepartmentMeeting(ev)) continue;
+    if (!isCountableLesson(ev)) continue;
     const label = subjectCountLabel(ev);
     counts.set(label, (counts.get(label) || 0) + summaryEventWeight(ev));
   }
@@ -1294,35 +1409,36 @@ function renderSummary() {
   const opt = selectedOption();
   const events = filteredEvents();
   const allViewEvents = DATA.events.filter(ev => matchesView(ev));
-  const nonDeptVisible = events.filter(ev => !isDepartmentMeeting(ev));
-  const nonDeptAllViewEvents = allViewEvents.filter(ev => !isDepartmentMeeting(ev));
-  const weekA = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'A')).length;
-  const weekB = nonDeptAllViewEvents.filter(ev => eventActiveInWeek(ev, 'B')).length;
+  const countableVisible = events.filter(isCountableLesson);
+  const countableAllViewEvents = allViewEvents.filter(isCountableLesson);
+  const weekA = countableAllViewEvents.filter(ev => eventActiveInWeek(ev, 'A')).length;
+  const weekB = countableAllViewEvents.filter(ev => eventActiveInWeek(ev, 'B')).length;
   const lessonCount = state.week === 'all'
-    ? nonDeptAllViewEvents.reduce((total, ev) => total + summaryEventWeight(ev), 0)
-    : nonDeptVisible.length;
+    ? countableAllViewEvents.reduce((total, ev) => total + summaryEventWeight(ev), 0)
+    : countableVisible.length;
   const rooms = new Set(events.flatMap(e => e.rooms).filter(Boolean));
   const teachers = new Set(events.flatMap(e => e.teachers).filter(Boolean));
   const classes = new Set(events.flatMap(e => e.classes).filter(Boolean));
-  const contract = opt?.contractCount;
+  // Weighted the same way the Teacher allocations tab weights hours, so the two agree.
+  const weightedLoad = allViewEvents.reduce((total, ev) => total + eventWeight(ev), 0);
   const weekLabel = state.week === 'all' ? 'all weeks' : `Week ${state.week}`;
   const subjectCounts = subjectCountsForSummary(events);
   const subjectText = subjectCounts.length
     ? subjectCounts.map(([k,v]) => `${k} (${formatLessonCount(v)})`).join(', ')
-    : 'No non-department lessons';
+    : 'No teaching lessons';
 
   activeTitle.textContent = `${state.view[0].toUpperCase() + state.view.slice(1)}: ${opt?.name || '—'}`;
-  activeSubtitle.textContent = `${formatLessonCount(lessonCount)} lesson${Number(lessonCount) === 1 ? '' : 's'} counted for ${weekLabel}; department meetings excluded.`;
+  activeSubtitle.textContent = `${formatLessonCount(lessonCount)} lesson${Number(lessonCount) === 1 ? '' : 's'} counted for ${weekLabel}; department meetings, break and lunch excluded.`;
   sourceNote.textContent = `${DATA.meta.sourceLabel || sourceConfig().label} · ${DATA.meta.sourceXml} · ${DATA.meta.sourceWorkbook}`;
 
   const entityLabel = state.view === 'teacher' ? 'Classes taught' : state.view === 'class' ? 'Teachers' : 'Teachers';
   const entityCount = state.view === 'class' ? teachers.size : state.view === 'teacher' ? classes.size : teachers.size;
   const stats = [
-    statHtml('Number of lessons', formatLessonCount(lessonCount), 'Department meetings excluded'),
-    `<div class="stat wide subject-summary"><b>${esc(subjectText)}</b><span>Subjects taught</span><span>Counts exclude department meetings</span></div>`,
-    statHtml('Week A / B lessons', `${weekA} / ${weekB}`, 'Non-department lessons active each week'),
+    statHtml('Number of lessons', formatLessonCount(lessonCount), 'Meetings, break and lunch excluded'),
+    `<div class="stat wide subject-summary"><b>${esc(subjectText)}</b><span>Subjects taught</span><span>Counts exclude meetings, break and lunch</span></div>`,
+    statHtml('Week A / B lessons', `${weekA} / ${weekB}`, 'Teaching lessons active each week'),
     statHtml(entityLabel, entityCount, 'Unique linked entities'),
-    statHtml('Load count', contract ?? '—', 'Estimated average weekly periods from XML')
+    statHtml('Weighted periods', formatLessonCount(weightedLoad), 'All cards, Week A/B at 0.5 — matches allocations')
   ];
   summary.innerHTML = stats.join('');
   footerNote.innerHTML = '';
@@ -1767,7 +1883,7 @@ async function initViewer() {
     state.id = null;
     if (DATA_CACHE.has(activeSourceKey)) {
       DATA = DATA_CACHE.get(activeSourceKey);
-      setXmlStatus(`<strong>${esc(sourceConfig().label)} restored:</strong> ${esc(DATA.meta.sourceXml || 'cached XML')} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons`);
+      setXmlStatus(`<strong>${esc(sourceConfig().label)} restored:</strong> ${esc(DATA.meta.sourceXml || 'cached XML')} · ${DATA.meta.stats.events} cards · ${DATA.meta.stats.lessons} lessons${fridayWarningHtml(DATA, activeSourceKey)}`);
     } else {
       await loadXmlFromDefault();
     }
