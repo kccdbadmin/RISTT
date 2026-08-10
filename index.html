@@ -227,15 +227,30 @@
       thead th { top:0; }
     }
     @media print {
+      /* Five day-columns do not fit portrait. Note this overrides the orientation chosen
+         in the print dialog in Chrome and Edge, and is ignored by Safari. */
+      @page { size: landscape; margin: 10mm; }
       body { background:white; }
-      header, .tab-nav, .toolbar, .summary, .notice, .footer-note { display:none !important; }
+      /* .xml-source is a file picker and status line — meaningless on paper, and it was
+         costing roughly a third of the first page. */
+      header, .tab-nav, .toolbar, .summary, .notice, .footer-note,
+      .xml-source { display:none !important; }
       main { padding:0; }
-      .table-wrap { border:0; box-shadow:none; overflow:visible; }
+      /* These height caps are calc(100vh - …), sized for a scrolling screen. Left in place
+         they clip or overlap printed content, since only overflow was being reset. */
+      .table-wrap { border:0; box-shadow:none; overflow:visible; max-height:none; }
+      .allocation-wrap { max-height:none; }
       table { min-width:0; font-size:10px; }
       td { height:auto; padding:4px; }
+      /* Keep a period's row whole, and repeat the day headers on every page. */
+      tr { break-inside:avoid; }
+      thead { display:table-header-group; }
       .card { box-shadow:none; break-inside:avoid; }
       thead th, tbody th { position:static; }
       .viewer-title { margin:0 0 8px; }
+      /* Force card tints and the shaded Mentor/Break/Lunch rows to print. Costs toner, and
+         on a mono printer the tints render as grey fills. */
+      * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     }
   </style>
 </head>
