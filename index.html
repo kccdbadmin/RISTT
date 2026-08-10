@@ -212,6 +212,39 @@
     .alloc-pill strong { margin-right:4px; color:#14213d; }
     .alloc-muted { color:var(--muted); font-size:12px; line-height:1.35; }
     .allocation-empty { padding:20px; color:var(--muted); }
+
+    /* --- Print selection panel (screen only) --- */
+    .print-panel { margin:12px 0 0; display:grid; grid-template-columns:.85fr 1.2fr auto auto 1fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:12px 14px; box-shadow:0 10px 30px rgba(15,35,55,.04); }
+    .print-list { margin:10px 0 0; max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:#fff; padding:8px; display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:2px; }
+    .print-item { display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 7px; border-radius:8px; cursor:pointer; }
+    .print-item:hover { background:#f1f5f9; }
+    .print-item input { width:15px; height:15px; accent-color:var(--kcc-green); flex:0 0 auto; }
+    .print-item span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .print-count { display:flex; align-items:center; min-height:42px; font-size:13px; color:var(--muted); }
+    .print-count strong { color:var(--ink); }
+
+    /* --- Printed page: one entity per sheet, days as rows, periods as columns --- */
+    .print-root { display:none; }
+    .pg-page { break-after:page; break-inside:avoid; }
+    .pg-page:last-child { break-after:auto; }
+    .pg-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin:0 0 5px; }
+    .pg-title { font-size:17px; font-weight:850; letter-spacing:-.02em; }
+    .pg-sub { font-size:9px; color:#5e6b7a; text-align:right; }
+    .pg-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .pg-table th, .pg-table td { border:1px solid #9aa6b6; vertical-align:top; padding:2px; }
+    .pg-table thead th { background:#eef2f7; text-align:center; padding:3px 2px; }
+    .pg-pnum { font-size:12px; font-weight:850; line-height:1.1; }
+    .pg-ptime { font-size:7px; color:#475569; white-space:nowrap; }
+    .pg-day { width:32px; text-align:center; font-size:16px; font-weight:850; background:#f6f8fb; }
+    .pg-cell { height:60px; }
+    .pg-off { background:#eef0f3; }
+    .pg-lesson { --h:170; border-left:3px solid hsl(var(--h),55%,45%); background:hsl(var(--h),70%,94%); border-radius:2px; padding:1px 3px; margin-bottom:1px; break-inside:avoid; }
+    .pg-subject { font-size:8.5px; font-weight:850; line-height:1.12; overflow-wrap:anywhere; }
+    .pg-meta { font-size:7px; line-height:1.18; color:#334155; overflow-wrap:anywhere; }
+    .pg-wk { display:inline-block; border:1px solid #94a3b8; border-radius:5px; padding:0 2px; font-size:6.5px; margin-left:2px; }
+    .pg-slot-in { background:#dfe5ec; text-align:center; font-size:8px; font-weight:850; color:#41505f; border-radius:2px; padding:3px 2px; }
+    .pg-ftime { font-size:6.5px; color:#9a4708; font-weight:700; text-align:right; }
+    .pg-foot { margin-top:4px; font-size:7px; color:#5e6b7a; line-height:1.3; }
     @media (max-width: 900px) {
       .toolbar, .xml-source { grid-template-columns:1fr; position:relative; }
       .header-shell, .release-grid, .allocation-header { grid-template-columns:1fr; display:grid; }
@@ -234,7 +267,7 @@
       /* .xml-source is a file picker and status line — meaningless on paper, and it was
          costing roughly a third of the first page. */
       header, .tab-nav, .toolbar, .summary, .notice, .footer-note,
-      .xml-source { display:none !important; }
+      .xml-source, .print-panel, .print-list { display:none !important; }
       main { padding:0; }
       /* These height caps are calc(100vh - …), sized for a scrolling screen. Left in place
          they clip or overlap printed content, since only overflow was being reset. */
@@ -251,6 +284,12 @@
       /* Force card tints and the shaded Mentor/Break/Lunch rows to print. Costs toner, and
          on a mono printer the tints render as grey fills. */
       * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      /* Entity print mode: swap the whole app for one compact grid per selected
+         class/teacher/subject, each on its own sheet. Set by printEntities(), so a plain
+         Ctrl+P from any tab still prints that tab the ordinary way. */
+      body.printing-entities > header,
+      body.printing-entities > main { display:none !important; }
+      body.printing-entities .print-root { display:block !important; }
     }
   </style>
 </head>
@@ -308,7 +347,7 @@
       <div class="button-row">
         <button id="downloadCsv">CSV</button>
         <button id="copySummary">Copy summary</button>
-        <button class="primary" onclick="window.print()">Print</button>
+        <button class="primary" id="printCurrent" type="button">Print</button>
       </div>
     </div>
   </section>
@@ -335,6 +374,36 @@
     </div>
     <div class="status-line" id="xmlStatus">Loading XML…</div>
   </section>
+
+  <section class="print-panel" aria-label="Print options">
+    <div>
+      <label for="printType">Print one page per</label>
+      <select id="printType">
+        <option value="class">Class</option>
+        <option value="teacher">Teacher</option>
+        <option value="subject">Subject</option>
+      </select>
+    </div>
+    <div>
+      <label for="printSearch">Filter the list</label>
+      <input type="search" id="printSearch" placeholder="Type to filter…">
+    </div>
+    <div>
+      <label>Selection</label>
+      <div class="button-row">
+        <button id="printSelectAll" type="button">All</button>
+        <button id="printSelectNone" type="button">None</button>
+      </div>
+    </div>
+    <div>
+      <label>Output</label>
+      <div class="button-row">
+        <button id="printSelected" class="primary" type="button">Print selected</button>
+      </div>
+    </div>
+    <div class="print-count" id="printCount"></div>
+  </section>
+  <div class="print-list" id="printList"></div>
 
   <section class="viewer-title">
     <div>
@@ -718,6 +787,7 @@
     </div>
   </section>
 </main>
+<div class="print-root" id="printRoot" aria-hidden="true"></div>
 <script>
 const TIMETABLE_SOURCES = {
   secondary: {
@@ -1853,6 +1923,170 @@ allocationLoadFilter?.addEventListener('change', renderTeacherAllocations);
 allocationSort?.addEventListener('change', renderTeacherAllocations);
 downloadAllocationCsvButton?.addEventListener('click', downloadAllocationCsv);
 
+// --- Printing -------------------------------------------------------------
+// The screen grid is periods-as-rows split across two tables. For paper that wastes the
+// page, so printing transposes it: days as rows, periods as columns, one entity per sheet.
+const printType = document.getElementById('printType');
+const printSearch = document.getElementById('printSearch');
+const printList = document.getElementById('printList');
+const printCount = document.getElementById('printCount');
+const printRoot = document.getElementById('printRoot');
+const printSelection = { class: new Set(), teacher: new Set(), subject: new Set() };
+const printDefaulted = { class: false, teacher: false, subject: false };
+
+function currentPrintType() { return printType?.value || 'class'; }
+// Default is everything for the loaded source; recomputed whenever the data changes.
+function ensurePrintDefaults(type) {
+  if (printDefaulted[type]) return;
+  printSelection[type] = new Set((DATA.selectors[type] || []).map(item => item.id));
+  printDefaulted[type] = true;
+}
+function resetPrintSelection() {
+  for (const type of ['class', 'teacher', 'subject']) {
+    printSelection[type] = new Set();
+    printDefaulted[type] = false;
+  }
+}
+function selectedPrintIds(type = currentPrintType()) {
+  ensurePrintDefaults(type);
+  return (DATA.selectors[type] || []).filter(item => printSelection[type].has(item.id)).map(item => item.id);
+}
+function updatePrintCount() {
+  if (!printCount) return;
+  const type = currentPrintType();
+  ensurePrintDefaults(type);
+  const total = (DATA.selectors[type] || []).length;
+  const n = printSelection[type].size;
+  printCount.innerHTML = `<span><strong>${esc(n)}</strong> of ${esc(total)} selected · one page each</span>`;
+}
+function renderPrintList() {
+  if (!printList) return;
+  const type = currentPrintType();
+  ensurePrintDefaults(type);
+  const q = String(printSearch?.value || '').trim().toLowerCase();
+  const items = (DATA.selectors[type] || []).filter(item =>
+    !q || String(item.name || '').toLowerCase().includes(q) || String(item.short || '').toLowerCase().includes(q));
+  printList.innerHTML = items.length
+    ? items.map(item => `<label class="print-item"><input type="checkbox" value="${esc(item.id)}"${printSelection[type].has(item.id) ? ' checked' : ''}><span>${esc(item.name)}</span></label>`).join('')
+    : '<div class="alloc-muted">No matches for that filter.</div>';
+  updatePrintCount();
+}
+function printLessonHtml(ev, view, id) {
+  if (isNonTeachingSlot(ev)) return `<div class="pg-slot-in">${esc(ev.subject)}</div>`;
+  const lines = [];
+  const group = view === 'class'
+    ? uniq((ev.groupByClass || []).filter(g => g.classId === id).map(g => g.name)).join(', ')
+    : ev.groups.join(', ');
+  if (group && group !== 'Entire class') lines.push(esc(group));
+  if (view !== 'class' && ev.classes.length) lines.push(esc(ev.classes.join(', ')));
+  if (view !== 'teacher' && ev.teachers.length) lines.push(esc(ev.teachers.join(', ')));
+  if (ev.rooms.length) lines.push(esc(ev.rooms.join(', ')));
+  const wk = (ev.weekShort === 'A' || ev.weekShort === 'B') ? `<span class="pg-wk">${esc(ev.weekShort)}</span>` : '';
+  return `<div class="pg-lesson" style="--h:${esc(ev.subjectHue)}">
+    <div class="pg-subject">${esc(ev.subject || ev.subjectShort || 'Lesson')}${wk}</div>
+    ${lines.length ? `<div class="pg-meta">${lines.join('<br>')}</div>` : ''}
+  </div>`;
+}
+function printPageHtml(view, id) {
+  const opt = (DATA.selectors[view] || []).find(item => item.id === id);
+  if (!opt) return '';
+  const events = DATA.events.filter(ev =>
+    (view === 'class' ? ev.classIds.includes(id)
+      : view === 'teacher' ? ev.teacherIds.includes(id)
+        : ev.subjectId === id) && includesWeek(ev));
+  const slots = new Map();
+  for (const ev of events) {
+    const key = `${ev.dayKey}|${ev.period}`;
+    if (!slots.has(key)) slots.set(key, []);
+    slots.get(key).push(ev);
+  }
+  // Friday has its own structure; periods it does not run are greyed out rather than blank,
+  // and each Friday cell carries its real time because the column header is Mon–Thu.
+  const fridaySchedule = FRIDAY_SCHEDULE[activeSourceKey] || [];
+  const fridayByPeriod = new Map(fridaySchedule.filter(r => r.ascPeriod).map(r => [r.ascPeriod, r]));
+  let showFridayNote = false;
+
+  const head = `<tr><th class="pg-day"></th>${DATA.periods.map(p =>
+    `<th><div class="pg-pnum">${esc(p.period)}</div><div class="pg-ptime">${esc(p.starttime)}–${esc(p.endtime)}</div></th>`).join('')}</tr>`;
+
+  let body = '';
+  for (const day of DATA.days) {
+    const isFriday = day.key === FRIDAY_KEY;
+    body += `<tr><th class="pg-day">${esc(day.short || day.name)}</th>`;
+    for (const p of DATA.periods) {
+      const arr = slots.get(`${day.key}|${p.period}`) || [];
+      if (isFriday && fridaySchedule.length) {
+        const row = fridayByPeriod.get(p.period);
+        if (!row) { body += '<td class="pg-cell pg-off"></td>'; continue; }
+        showFridayNote = true;
+        const time = `<div class="pg-ftime">${esc(row.time)}</div>`;
+        body += row.type === 'period'
+          ? `<td class="pg-cell">${time}${arr.map(ev => printLessonHtml(ev, view, id)).join('')}</td>`
+          : `<td class="pg-cell">${time}<div class="pg-slot-in">${esc(row.label)}</div></td>`;
+        continue;
+      }
+      body += `<td class="pg-cell">${arr.map(ev => printLessonHtml(ev, view, id)).join('')}</td>`;
+    }
+    body += '</tr>';
+  }
+  const weekText = state.week === 'all' ? 'All weeks' : `Week ${state.week}`;
+  const label = view[0].toUpperCase() + view.slice(1);
+  return `<section class="pg-page">
+    <div class="pg-head">
+      <div class="pg-title">${esc(label)}: ${esc(opt.name)}</div>
+      <div class="pg-sub">${esc(DATA.meta.title || sourceConfig().title)}<br>${esc(sourceConfig().label)} · ${esc(weekText)}</div>
+    </div>
+    <table class="pg-table"><thead>${head}</thead><tbody>${body}</tbody></table>
+    ${showFridayNote ? '<div class="pg-foot">Column times are Monday&ndash;Thursday. Friday runs its own shortened times, printed in each Friday cell; shaded Friday cells are periods that do not run.</div>' : ''}
+  </section>`;
+}
+function printEntities(view, ids) {
+  if (!printRoot || !ids.length) return false;
+  printRoot.innerHTML = ids.map(id => printPageHtml(view, id)).join('');
+  document.body.classList.add('printing-entities');
+  const cleanup = () => {
+    document.body.classList.remove('printing-entities');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 2000);
+  return true;
+}
+printType?.addEventListener('change', renderPrintList);
+printSearch?.addEventListener('input', renderPrintList);
+printList?.addEventListener('change', event => {
+  const box = event.target.closest('input[type="checkbox"]');
+  if (!box) return;
+  const type = currentPrintType();
+  ensurePrintDefaults(type);
+  if (box.checked) printSelection[type].add(box.value); else printSelection[type].delete(box.value);
+  updatePrintCount();
+});
+// All/None act on what the filter is currently showing, so you can select a whole grade.
+document.getElementById('printSelectAll')?.addEventListener('click', () => {
+  const type = currentPrintType();
+  ensurePrintDefaults(type);
+  printList.querySelectorAll('input[type="checkbox"]').forEach(box => printSelection[type].add(box.value));
+  renderPrintList();
+});
+document.getElementById('printSelectNone')?.addEventListener('click', () => {
+  const type = currentPrintType();
+  ensurePrintDefaults(type);
+  printList.querySelectorAll('input[type="checkbox"]').forEach(box => printSelection[type].delete(box.value));
+  renderPrintList();
+});
+document.getElementById('printSelected')?.addEventListener('click', () => {
+  const type = currentPrintType();
+  const ids = selectedPrintIds(type);
+  if (!ids.length) { updatePrintCount(); printCount.innerHTML = '<span class="status-warn"><strong>Nothing selected.</strong> Tick at least one.</span>'; return; }
+  printEntities(type, ids);
+});
+// Toolbar Print stays the quick path: just whatever is on screen, one page.
+document.getElementById('printCurrent')?.addEventListener('click', () => {
+  if (state.id) printEntities(state.view, [state.id]); else window.print();
+});
+
 function renderEvidenceBlocks() {
   document.querySelectorAll('.visual-demo').forEach(el => {
     const type = el.dataset.demo;
@@ -1885,6 +2119,9 @@ async function refreshAfterDataLoad(keepSelection=false) {
   render();
   renderTeacherAllocations();
   renderEvidenceBlocks();
+  // Selection defaults to everything in the newly loaded source.
+  resetPrintSelection();
+  renderPrintList();
 }
 async function initViewer() {
   const xmlFile = document.getElementById('xmlFile');
