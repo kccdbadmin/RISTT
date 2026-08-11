@@ -262,6 +262,9 @@
     .sc-count.is-hot { background:#ffd9d9; color:#8a1f1f; }
     .sc-count.is-some { background:#fff1dd; color:#8a5300; }
     .sc-count.is-none { color:#aab4c0; font-weight:600; }
+    .sc-lesson { background:#eaf4ff; color:#2b4a72; }
+    .sc-clash { background:#ffd9d9; color:#8a1f1f; font-weight:900; }
+    .sc-divhead { background:#eef2f7 !important; font-weight:900; color:#14213d; text-transform:uppercase; letter-spacing:.06em; font-size:10px; }
     .school-legend { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; font-size:12px; color:var(--muted); align-items:center; }
     .school-legend span.key { display:inline-flex; align-items:center; gap:5px; }
     .school-legend i { width:14px; height:12px; border-radius:3px; display:inline-block; border:1px solid var(--line); }
@@ -364,6 +367,7 @@
     <button class="tab-btn" data-section="timetableSection" aria-selected="true">Timetable viewer</button>
     <button class="tab-btn" data-section="scheduleSection" aria-selected="false">Daily schedule</button>
     <button class="tab-btn" data-section="schoolSection" aria-selected="false">Whole school</button>
+    <button class="tab-btn" data-section="allSchoolSection" aria-selected="false">Both divisions</button>
     <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
@@ -523,6 +527,44 @@
       <section class="table-wrap school-wrap">
         <table id="schoolTable" class="school-table" aria-label="Whole school grid"></table>
       </section>
+    </div>
+  </section>
+
+  <section id="allSchoolSection" class="page-section" aria-label="Both divisions">
+    <div class="allocation-panel">
+      <h2>Both divisions</h2>
+      <p>Every class in the school, Secondary and Primary together, on a single <strong>clock-time</strong> axis. Period numbers cannot be shared &mdash; Secondary runs six periods from 7:45 and Primary ten from 8:20 &mdash; so columns here are real time spans, and each column is only as wide as the minutes it covers. Use this to check the shared cafeteria and PE spaces.</p>
+      <div class="school-controls">
+        <div>
+          <label for="allDay">Day</label>
+          <select id="allDay"></select>
+        </div>
+        <div>
+          <label>Display</label>
+          <label class="check-control" for="allBreaksOnly"><input type="checkbox" id="allBreaksOnly" checked> Breaks only</label>
+        </div>
+        <div>
+          <label>Actions</label>
+          <div class="button-row"><button id="allCsv" type="button">CSV</button></div>
+        </div>
+        <div class="print-count" id="allNote"></div>
+      </div>
+      <section class="summary" id="allStats"></section>
+      <h3 class="grid-heading">Overlapping break windows</h3>
+      <section class="table-wrap">
+        <table id="allClashTable" class="allocation-table" aria-label="Break overlaps between divisions"></table>
+      </section>
+      <h3 class="grid-heading">Every class by clock time</h3>
+      <section class="table-wrap school-wrap">
+        <table id="allSchoolTable" class="school-table" aria-label="All classes by clock time"></table>
+      </section>
+      <div class="school-legend">
+        <span class="key"><i style="background:#ffe6cc"></i> Break</span>
+        <span class="key"><i style="background:#ffd4ad"></i> Lunch</span>
+        <span class="key"><i style="background:#ffd9d9"></i> Both divisions on break</span>
+        <span class="key"><i style="background:#eaf4ff"></i> Lesson</span>
+        <span class="key"><i style="background:#eef0f3"></i> Not in school</span>
+      </div>
     </div>
   </section>
 
@@ -2189,6 +2231,230 @@ schoolDay?.addEventListener('change', renderSchoolGrid);
 schoolGrade?.addEventListener('change', renderSchoolGrid);
 schoolBreaksOnly?.addEventListener('change', renderSchoolGrid);
 document.getElementById('schoolCsv')?.addEventListener('click', downloadSchoolCsv);
+
+// --- Both divisions -------------------------------------------------------
+// Secondary runs six periods from 7:45, Primary ten from 8:20, so a period number means
+// different things in each. The only axis they share is the clock, so this view is built
+// on real minutes and columns are as wide as the time they cover.
+const allDay = document.getElementById('allDay');
+const allBreaksOnly = document.getElementById('allBreaksOnly');
+const allSchoolTable = document.getElementById('allSchoolTable');
+const allClashTable = document.getElementById('allClashTable');
+const allStats = document.getElementById('allStats');
+const allNote = document.getElementById('allNote');
+const DAY_ORDER = DAY_FALLBACK.map(d => d.key);
+
+function hhmmToMin(value) {
+  const m = String(value || '').match(/(\d{1,2}):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function minToHhmm(n) { return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; }
+function spanFromRange(text) {
+  const parts = String(text || '').split(/[–—-]/);
+  return [hhmmToMin(parts[0]), hhmmToMin(parts[1])];
+}
+// This view needs both exports at once, which nothing else in the app does.
+async function ensureBothSources() {
+  for (const key of Object.keys(TIMETABLE_SOURCES)) {
+    if (DATA_CACHE.has(key)) continue;
+    for (const path of TIMETABLE_SOURCES[key].candidates) {
+      try {
+        const response = await fetch(`${path}?v=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) continue;
+        DATA_CACHE.set(key, parseAscXml(await response.text(), path, key));
+        break;
+      } catch (err) { /* try the next candidate filename */ }
+    }
+  }
+}
+function divisionSegments(sourceKey, dayKey) {
+  const data = DATA_CACHE.get(sourceKey);
+  if (!data) return [];
+  const isFriday = dayKey === FRIDAY_KEY;
+  const fridayRows = FRIDAY_SCHEDULE[sourceKey] || [];
+  const fridayByPeriod = new Map(fridayRows.filter(r => r.ascPeriod).map(r => [r.ascPeriod, r]));
+  const periodSpan = p => {
+    if (isFriday && fridayRows.length) {
+      const row = fridayByPeriod.get(p.period);
+      return row ? spanFromRange(row.time) : null;
+    }
+    return [hhmmToMin(p.starttime), hhmmToMin(p.endtime)];
+  };
+  // Secondary break/mentor/lunch are bell events shared by every class, not cards.
+  const bellBreaks = [];
+  if (sourceKey === 'secondary') {
+    if (isFriday) fridayRows.filter(r => r.type === 'slot').forEach(r => bellBreaks.push({ label: r.label, span: spanFromRange(r.time) }));
+    else Object.values(SECONDARY_INTERSTITIALS).flat().forEach(s => bellBreaks.push({ label: s.label, span: spanFromRange(s.monThu) }));
+  }
+  const byClassPeriod = new Map();
+  for (const ev of data.events) {
+    if (ev.dayKey !== dayKey) continue;
+    for (const classId of ev.classIds) {
+      const key = `${classId}|${ev.period}`;
+      if (!byClassPeriod.has(key)) byClassPeriod.set(key, []);
+      byClassPeriod.get(key).push(ev);
+    }
+  }
+  return data.selectors.class.map(c => {
+    const segments = [];
+    for (const p of data.periods) {
+      const span = periodSpan(p);
+      if (!span || span[0] == null) continue;
+      const arr = byClassPeriod.get(`${c.id}|${p.period}`) || [];
+      const nonTeaching = arr.filter(isNonTeachingSlot);
+      if (nonTeaching.length) segments.push({ s: span[0], e: span[1], kind: 'break', label: nonTeaching[0].subject });
+      else if (arr.length) segments.push({ s: span[0], e: span[1], kind: 'lesson', label: uniq(arr.map(x => x.subjectShort || x.subject)).join(', ') });
+    }
+    for (const b of bellBreaks) if (b.span[0] != null) segments.push({ s: b.span[0], e: b.span[1], kind: 'break', label: b.label });
+    return { division: sourceKey === 'secondary' ? 'Secondary' : 'Primary', name: c.name, short: abbrevClassName(c), segments };
+  });
+}
+function clashesForDay(dayKey) {
+  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)];
+  const breaks = rows.flatMap(r => r.segments.filter(s => s.kind === 'break').map(s => ({ ...s, division: r.division, short: r.short })));
+  const marks = uniq(breaks.flatMap(b => [b.s, b.e])).sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < marks.length - 1; i++) {
+    const s = marks[i], e = marks[i + 1];
+    const active = breaks.filter(b => b.s < e && b.e > s);
+    const sec = active.filter(b => b.division === 'Secondary');
+    const pri = active.filter(b => b.division === 'Primary');
+    if (!sec.length || !pri.length) continue;
+    out.push({ s, e, mins: e - s, secondary: sec.length, primary: pri.length,
+      primaryWho: uniq(pri.map(b => b.short)), labels: uniq(active.map(b => b.label)) });
+  }
+  // merge adjacent windows with identical participation
+  const merged = [];
+  for (const w of out) {
+    const last = merged[merged.length - 1];
+    if (last && last.e === w.s && last.secondary === w.secondary && last.primary === w.primary) {
+      last.e = w.e; last.mins += w.mins;
+      last.labels = uniq(last.labels.concat(w.labels));
+    } else merged.push({ ...w });
+  }
+  return merged;
+}
+function renderAllSchool() {
+  if (!allSchoolTable) return;
+  if (!DATA_CACHE.has('secondary') || !DATA_CACHE.has('primary')) {
+    allSchoolTable.innerHTML = '<tbody><tr><td class="allocation-empty">Loading both timetables…</td></tr></tbody>';
+    return;
+  }
+  if (allDay && !allDay.options.length) {
+    allDay.innerHTML = DAY_FALLBACK.map(d => `<option value="${esc(d.key)}">${esc(d.name)}</option>`).join('');
+  }
+  const dayKey = allDay?.value || DAY_ORDER[0];
+  const breaksOnly = !!allBreaksOnly?.checked;
+  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)]
+    .filter(r => r.segments.length);
+  const marks = uniq(rows.flatMap(r => r.segments.flatMap(s => [s.s, s.e]))).sort((a, b) => a - b);
+  const cols = [];
+  for (let i = 0; i < marks.length - 1; i++) cols.push([marks[i], marks[i + 1]]);
+  if (!cols.length) {
+    allSchoolTable.innerHTML = '<tbody><tr><td class="allocation-empty">No timetabled activity on this day.</td></tr></tbody>';
+    return;
+  }
+  const totalMins = marks[marks.length - 1] - marks[0];
+  const atBreak = cols.map(([s, e]) => {
+    const mid = (s + e) / 2;
+    const on = rows.filter(r => r.segments.some(x => x.kind === 'break' && x.s <= mid && x.e > mid));
+    return { secondary: on.filter(r => r.division === 'Secondary').length,
+             primary: on.filter(r => r.division === 'Primary').length };
+  });
+
+  let head = `<thead><tr><th>Class</th>${cols.map(([s, e]) =>
+    `<th style="width:${((e - s) / totalMins * 92).toFixed(2)}%"><div class="sc-pnum">${esc(minToHhmm(s))}</div><div class="sc-ptime">${esc(e - s)}m</div></th>`).join('')}</tr>`;
+  head += `<tr class="sc-countrow"><th>At break</th>${atBreak.map(b => {
+    const clash = b.secondary > 0 && b.primary > 0;
+    const total = b.secondary + b.primary;
+    const cls = clash ? 'is-hot' : total ? 'is-some' : 'is-none';
+    return `<th class="sc-count ${cls}" title="Secondary ${b.secondary}, Primary ${b.primary}">${total ? `${esc(b.secondary)}/${esc(b.primary)}` : '0'}</th>`;
+  }).join('')}</tr></thead>`;
+
+  let body = '';
+  let lastDivision = '';
+  rows.forEach(r => {
+    if (r.division !== lastDivision) {
+      lastDivision = r.division;
+      body += `<tr><th class="sc-divhead">${esc(r.division)}</th><td class="sc-divhead" colspan="${cols.length}">${esc(r.division)} &mdash; ${esc(rows.filter(x => x.division === r.division).length)} classes</td></tr>`;
+    }
+    body += `<tr><th title="${esc(r.name)}">${esc(r.short)}</th>${cols.map(([s, e], i) => {
+      const mid = (s + e) / 2;
+      const seg = r.segments.find(x => x.s <= mid && x.e > mid);
+      if (!seg) return '<td class="sc-cell sc-off"></td>';
+      if (seg.kind === 'break') {
+        const clash = atBreak[i].secondary > 0 && atBreak[i].primary > 0;
+        const kind = clash ? 'sc-clash' : /lunch/i.test(seg.label) ? 'sc-lunch' : 'sc-break';
+        return `<td class="sc-cell ${kind}" title="${esc(seg.label)} ${esc(minToHhmm(seg.s))}–${esc(minToHhmm(seg.e))}">${esc(seg.label.replace(/\s*PYP$/i, ''))}</td>`;
+      }
+      if (breaksOnly) return '<td class="sc-cell sc-dim">·</td>';
+      return `<td class="sc-cell sc-lesson" title="${esc(seg.label)}">${esc(seg.label.split(',')[0])}</td>`;
+    }).join('')}</tr>`;
+  });
+  allSchoolTable.innerHTML = `${head}<tbody>${body}</tbody>`;
+
+  // Clash table spans the whole week, not just the shown day.
+  const weekly = DAY_ORDER.map(k => ({ key: k, name: (DAY_FALLBACK.find(d => d.key === k) || {}).name, list: clashesForDay(k) }))
+    .filter(d => d.list.length);
+  if (allClashTable) {
+    allClashTable.innerHTML = weekly.length
+      ? `<thead><tr><th>Day</th><th>Window</th><th>Minutes</th><th>Secondary</th><th>Primary</th><th>Total classes</th><th>Primary groups</th><th>What</th></tr></thead><tbody>${
+        weekly.flatMap(d => d.list.map(w => `<tr>
+          <td><strong>${esc(d.name)}</strong></td>
+          <td class="allocation-teacher">${esc(minToHhmm(w.s))}–${esc(minToHhmm(w.e))}</td>
+          <td>${esc(w.mins)}</td>
+          <td>${esc(w.secondary)}</td>
+          <td>${esc(w.primary)}</td>
+          <td><div class="allocation-hours">${esc(w.secondary + w.primary)}</div></td>
+          <td><div class="alloc-stack">${compactList(w.primaryWho, 8).map(x => `<span class="alloc-pill">${esc(x)}</span>`).join('')}</div></td>
+          <td class="alloc-muted">${esc(w.labels.join(' + '))}</td></tr>`)).join('')}</tbody>`
+      : '<tbody><tr><td class="allocation-empty">No window where both divisions are on break at once.</td></tr></tbody>';
+  }
+  if (allStats) {
+    const all = weekly.flatMap(d => d.list);
+    const worst = all.slice().sort((a, b) => (b.secondary + b.primary) - (a.secondary + a.primary))[0];
+    const longest = all.slice().sort((a, b) => b.mins - a.mins)[0];
+    allStats.innerHTML = [
+      ['Classes in school', rows.length, `${DATA_CACHE.get('secondary').selectors.class.length} Secondary + ${DATA_CACHE.get('primary').selectors.class.length} Primary`],
+      ['Overlapping windows', all.length, all.length ? 'Both divisions on break together' : 'None all week'],
+      ['Longest overlap', longest ? `${longest.mins}m` : '—', longest ? `${minToHhmm(longest.s)}–${minToHhmm(longest.e)}` : 'No overlap'],
+      ['Most classes at once', worst ? worst.secondary + worst.primary : '—', worst ? `${worst.secondary} Secondary + ${worst.primary} Primary` : 'No overlap']
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (allNote) {
+    allNote.innerHTML = '<span>Columns are clock-time spans, not periods. <strong>At break</strong> reads Secondary/Primary; red marks a window where both are out at once.</span>';
+  }
+}
+function downloadAllSchoolCsv() {
+  const dayKey = allDay?.value || DAY_ORDER[0];
+  const dayName = (DAY_FALLBACK.find(d => d.key === dayKey) || {}).name || 'day';
+  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)].filter(r => r.segments.length);
+  const marks = uniq(rows.flatMap(r => r.segments.flatMap(s => [s.s, s.e]))).sort((a, b) => a - b);
+  const cols = [];
+  for (let i = 0; i < marks.length - 1; i++) cols.push([marks[i], marks[i + 1]]);
+  const out = [['Division', 'Class', ...cols.map(([s, e]) => `${minToHhmm(s)}-${minToHhmm(e)}`)]];
+  for (const r of rows) {
+    out.push([r.division, r.name, ...cols.map(([s, e]) => {
+      const seg = r.segments.find(x => x.s <= (s + e) / 2 && x.e > (s + e) / 2);
+      return seg ? (seg.kind === 'break' ? `BREAK: ${seg.label}` : seg.label) : '';
+    })]);
+  }
+  const csv = out.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `both_divisions_${dayName}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+allDay?.addEventListener('change', renderAllSchool);
+allBreaksOnly?.addEventListener('change', renderAllSchool);
+document.getElementById('allCsv')?.addEventListener('click', downloadAllSchoolCsv);
+document.querySelector('[data-section="allSchoolSection"]')?.addEventListener('click', async () => {
+  await ensureBothSources();
+  renderAllSchool();
+});
 
 // --- Printing -------------------------------------------------------------
 // The screen grid is periods-as-rows split across two tables. For paper that wastes the
