@@ -238,9 +238,9 @@
     .pg-day { width:32px; text-align:center; font-size:16px; font-weight:850; background:#f6f8fb; }
     .pg-cell { height:60px; }
     .pg-off { background:#eef0f3; }
-    .pg-lesson { --h:170; border-left:3px solid hsl(var(--h),55%,45%); background:hsl(var(--h),70%,94%); border-radius:2px; padding:1px 3px; margin-bottom:1px; break-inside:avoid; }
-    .pg-subject { font-size:8.5px; font-weight:850; line-height:1.12; overflow-wrap:anywhere; }
-    .pg-meta { font-size:7px; line-height:1.18; color:#334155; overflow-wrap:anywhere; }
+    .pg-lesson { --h:170; border-left:3px solid hsl(var(--h),55%,45%); background:hsl(var(--h),70%,94%); border-radius:2px; padding:0 2px; margin-bottom:1px; break-inside:avoid; }
+    .pg-subject { font-size:7.5px; font-weight:850; line-height:1.15; overflow-wrap:anywhere; }
+    .pg-meta { font-size:6.5px; line-height:1.2; color:#334155; overflow-wrap:anywhere; }
     .pg-wk { display:inline-block; border:1px solid #94a3b8; border-radius:5px; padding:0 2px; font-size:6.5px; margin-left:2px; }
     .pg-slot-in { background:#dfe5ec; text-align:center; font-size:8px; font-weight:850; color:#41505f; border-radius:2px; padding:3px 2px; }
     .pg-ftime { font-size:6.5px; color:#9a4708; font-weight:700; text-align:right; }
@@ -1971,21 +1971,79 @@ function renderPrintList() {
     : '<div class="alloc-muted">No matches for that filter.</div>';
   updatePrintCount();
 }
-function printLessonHtml(ev, view, id) {
-  if (isNonTeachingSlot(ev)) return `<div class="pg-slot-in">${esc(ev.subject)}</div>`;
-  const lines = [];
+function printGroupLabel(ev, view, id) {
   const group = view === 'class'
-    ? uniq((ev.groupByClass || []).filter(g => g.classId === id).map(g => g.name)).join(', ')
-    : ev.groups.join(', ');
-  if (group && group !== 'Entire class') lines.push(esc(group));
-  if (view !== 'class' && ev.classes.length) lines.push(esc(ev.classes.join(', ')));
-  if (view !== 'teacher' && ev.teachers.length) lines.push(esc(ev.teachers.join(', ')));
-  if (ev.rooms.length) lines.push(esc(ev.rooms.join(', ')));
-  const wk = (ev.weekShort === 'A' || ev.weekShort === 'B') ? `<span class="pg-wk">${esc(ev.weekShort)}</span>` : '';
-  return `<div class="pg-lesson" style="--h:${esc(ev.subjectHue)}">
-    <div class="pg-subject">${esc(ev.subject || ev.subjectShort || 'Lesson')}${wk}</div>
-    ${lines.length ? `<div class="pg-meta">${lines.join('<br>')}</div>` : ''}
+    ? uniq((ev.groupByClass || []).filter(g => g.classId === id).map(g => g.name)).join('/')
+    : ev.groups.join('/');
+  return group && group !== 'Entire class' ? group : '';
+}
+// Merged cards carry first names only for density; a last initial is added back when two
+// teachers in the same cell share one, so the pairing stays unambiguous where it matters.
+function printTeacherLabel(ev, disambiguate) {
+  const parts = String(ev.teachers[0] || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  return disambiguate && parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : parts[0];
+}
+// One card per subject per cell. Parallel option groups — up to eight Arabic sets in a
+// single Primary slot — fold into one card with their group/teacher pairs inline. That is
+// what makes a class fit on one sheet; stacking them is what overflowed the page.
+function printLessonGroupHtml(subject, evs, view, id) {
+  const lead = evs[0];
+  const sameWeek = evs.every(e => e.weekShort === lead.weekShort);
+  const wk = sameWeek && (lead.weekShort === 'A' || lead.weekShort === 'B')
+    ? `<span class="pg-wk">${esc(lead.weekShort)}</span>` : '';
+  let meta;
+  if (evs.length === 1) {
+    const lines = [];
+    const group = printGroupLabel(lead, view, id);
+    if (group) lines.push(esc(group));
+    if (view !== 'class' && lead.classes.length) lines.push(esc(lead.classes.join(', ')));
+    if (view !== 'teacher' && lead.teachers.length) lines.push(esc(lead.teachers.join(', ')));
+    if (lead.rooms.length) lines.push(esc(lead.rooms.join(', ')));
+    meta = lines.join('<br>');
+  } else {
+    const firsts = evs.map(e => String(e.teachers[0] || '').trim().split(/\s+/)[0]).filter(Boolean);
+    const clash = firsts.some((name, i) => firsts.indexOf(name) !== i);
+    // The same lesson often appears as two cards, one per week. Those produce an identical
+    // label, so collapse them: a label present in both A and B simply runs every week.
+    // Only a label confined to one week gets a tag, and only when the card is mixed.
+    const entries = new Map();
+    for (const ev of evs) {
+      const bits = [];
+      if (view !== 'class' && ev.classes.length) bits.push(ev.classes.join('/'));
+      const group = printGroupLabel(ev, view, id);
+      if (group) bits.push(group);
+      if (view !== 'teacher') { const who = printTeacherLabel(ev, clash); if (who) bits.push(who); }
+      const label = bits.join(' ');
+      if (!label) continue;
+      if (!entries.has(label)) entries.set(label, new Set());
+      entries.get(label).add(ev.weekShort || 'All');
+    }
+    meta = Array.from(entries, ([label, weeks]) => {
+      if (sameWeek) return esc(label);
+      const seen = Array.from(weeks);
+      const everyWeek = seen.includes('All') || (seen.includes('A') && seen.includes('B'));
+      const tag = !everyWeek && seen.length === 1 && (seen[0] === 'A' || seen[0] === 'B') ? ` (${seen[0]})` : '';
+      return esc(label + tag);
+    }).join(' · ');
+  }
+  return `<div class="pg-lesson" data-n="${esc(evs.length)}" style="--h:${esc(lead.subjectHue)}">
+    <div class="pg-subject">${esc(subject)}${wk}</div>
+    ${meta ? `<div class="pg-meta">${meta}</div>` : ''}
   </div>`;
+}
+function printCellHtml(arr, view, id) {
+  if (!arr.length) return '';
+  const out = [];
+  const bySubject = new Map();
+  for (const ev of arr) {
+    if (isNonTeachingSlot(ev)) { out.push(`<div class="pg-slot-in">${esc(ev.subject)}</div>`); continue; }
+    const key = ev.subject || ev.subjectShort || 'Lesson';
+    if (!bySubject.has(key)) bySubject.set(key, []);
+    bySubject.get(key).push(ev);
+  }
+  for (const [subject, evs] of bySubject) out.push(printLessonGroupHtml(subject, evs, view, id));
+  return out.join('');
 }
 function printPageHtml(view, id) {
   const opt = (DATA.selectors[view] || []).find(item => item.id === id);
@@ -2021,11 +2079,11 @@ function printPageHtml(view, id) {
         showFridayNote = true;
         const time = `<div class="pg-ftime">${esc(row.time)}</div>`;
         body += row.type === 'period'
-          ? `<td class="pg-cell">${time}${arr.map(ev => printLessonHtml(ev, view, id)).join('')}</td>`
+          ? `<td class="pg-cell">${time}${printCellHtml(arr, view, id)}</td>`
           : `<td class="pg-cell">${time}<div class="pg-slot-in">${esc(row.label)}</div></td>`;
         continue;
       }
-      body += `<td class="pg-cell">${arr.map(ev => printLessonHtml(ev, view, id)).join('')}</td>`;
+      body += `<td class="pg-cell">${printCellHtml(arr, view, id)}</td>`;
     }
     body += '</tr>';
   }
