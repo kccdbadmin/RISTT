@@ -17,18 +17,23 @@
       --warning:#fff7e6;
     }
     * { box-sizing:border-box; }
+    /* Class rules like .xml-source{display:grid} outrank the UA's [hidden]{display:none},
+       so a collapsed panel would still render. Make the attribute authoritative. */
+    [hidden] { display:none !important; }
     body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
-    header { padding:22px clamp(16px, 3vw, 36px); background:linear-gradient(135deg,#0f513f 0%, var(--kcc-green) 64%, #34b98a 100%); color:white; }
-    header h1 { margin:0 0 6px; font-size:clamp(24px, 4vw, 38px); letter-spacing:-.04em; }
+    header { padding:12px clamp(16px, 3vw, 36px); background:linear-gradient(135deg,#0f513f 0%, var(--kcc-green) 64%, #34b98a 100%); color:white; }
+    header h1 { margin:0; font-size:clamp(18px, 2.4vw, 26px); letter-spacing:-.03em; }
     header p { margin:0; opacity:.92; max-width:1100px; }
+    /* Boilerplate prose that repeats the README; it cost ~60px above the grid. */
+    #pageIntro { display:none; }
     .header-shell { display:flex; align-items:center; gap:20px; max-width:1280px; margin:0 auto; }
-    .logo-card { flex:0 0 auto; width:min(260px, 34vw); background:white; border-radius:18px; padding:12px 14px; box-shadow:0 14px 34px rgba(0,0,0,.16); }
+    .logo-card { flex:0 0 auto; width:min(150px, 26vw); background:white; border-radius:12px; padding:7px 9px; box-shadow:0 8px 20px rgba(0,0,0,.16); }
     .kcc-logo { display:block; width:100%; height:auto; object-fit:contain; }
     .header-copy { min-width:0; }
     .release-chip { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,.36); background:rgba(255,255,255,.16); border-radius:999px; padding:5px 10px; font-size:12px; font-weight:850; letter-spacing:.04em; text-transform:uppercase; margin-bottom:10px; }
     main { padding:18px clamp(12px, 3vw, 36px) 42px; }
-    .toolbar { display:grid; grid-template-columns: 1.05fr 1.75fr .75fr .85fr 1.1fr; gap:12px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 30px rgba(15,35,55,.06); position:sticky; top:0; z-index:20; }
-    label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700; margin:0 0 6px; }
+    .toolbar { display:grid; grid-template-columns: .9fr 1.5fr .7fr .8fr .8fr 1.5fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:10px 12px; box-shadow:0 6px 18px rgba(15,35,55,.06); position:sticky; top:0; z-index:20; }
+    label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:700; margin:0 0 4px; }
     .check-control { min-height:42px; display:flex; align-items:center; gap:9px; padding:0 12px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); font-size:13px; text-transform:none; letter-spacing:0; margin:0; cursor:pointer; }
     .check-control input { width:16px; height:16px; accent-color:var(--kcc-green); }
     select, input[type="search"] { width:100%; height:42px; border:1px solid var(--line); border-radius:12px; background:white; color:var(--ink); font-size:14px; padding:0 12px; outline:none; }
@@ -48,7 +53,16 @@
     .viewer-title { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:18px 0 10px; }
     .viewer-title h2 { margin:0; font-size:24px; letter-spacing:-.03em; }
     .viewer-title .subtitle { color:var(--muted); font-size:13px; }
-    .table-wrap { overflow:auto; max-width:100%; max-height:calc(100vh - 120px); border:1px solid var(--line); border-radius:18px; background:white; box-shadow:0 10px 30px rgba(15,35,55,.05); }
+    /* One compact line replacing the old 77px title block. */
+    .context-bar { display:flex; justify-content:space-between; align-items:baseline; gap:14px; flex-wrap:wrap; margin:8px 2px 0; }
+    .context-title { font-size:15px; letter-spacing:-.02em; }
+    .context-title strong { font-weight:850; }
+    .context-bar .subtitle { color:var(--muted); font-size:12px; font-weight:600; }
+    .grid-note { margin:0 0 5px 2px; font-size:12px; font-weight:750; color:var(--muted); }
+    .grid-note--fri { color:#9a4708; }
+    /* --grid-top is measured at runtime so the grid fills whatever viewport is left rather
+       than being pushed below the fold by the controls above it. */
+    .table-wrap { overflow:auto; max-width:100%; max-height:calc(100vh - var(--grid-top, 260px) - 18px); min-height:220px; border:1px solid var(--line); border-radius:14px; background:white; box-shadow:0 6px 18px rgba(15,35,55,.05); }
     table { width:100%; border-collapse:separate; border-spacing:0; min-width:980px; table-layout:fixed; }
     th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); vertical-align:top; }
     thead th { position:sticky; top:0; z-index:12; background:#f9fbfd; padding:10px; text-align:left; font-size:13px; box-shadow:0 1px 0 var(--line); }
@@ -75,7 +89,9 @@
     tr.slot-row.mentor th .period, tr.slot-row.mentor .slot-cell { color:#0d6848; }
     tr.slot-row.recess th, tr.slot-row.recess td { background:#fff6ee; }
     tr.slot-row.recess th .period, tr.slot-row.recess .slot-cell { color:#9a4708; }
-    td { height:112px; width:18%; padding:6px; background:white; }
+    /* height on a table cell is a minimum, not a cap. No cell's content exceeds ~69px, so
+       112 was ~43px of dead space on every row; 70 lets a busy cell still grow. */
+    td { height:70px; width:18%; padding:6px; background:white; }
     tr:last-child th, tr:last-child td { border-bottom:0; }
     th:last-child, td:last-child { border-right:0; }
     .cell-empty { color:#a5afbc; font-size:12px; padding:4px; }
@@ -102,7 +118,19 @@
     .footer-note { color:var(--muted); font-size:12px; margin-top:12px; }
     .hidden { display:none !important; }
 
-    .xml-source { margin:12px 0 0; display:grid; grid-template-columns: .8fr 1.15fr auto auto 1.6fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:12px 14px; box-shadow:0 10px 30px rgba(15,35,55,.04); }
+    .xml-source { margin:8px 0 0; display:grid; grid-template-columns: 1.4fr auto auto; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px 14px; box-shadow:0 6px 18px rgba(15,35,55,.04); }
+    /* Disclosure + focus state on the toolbar buttons. */
+    button[aria-expanded="true"], button[aria-pressed="true"] { background:var(--ink); color:#fff; border-color:var(--ink); }
+    body.focus-mode > header,
+    body.focus-mode .tab-nav,
+    body.focus-mode .context-bar,
+    body.focus-mode #dataPanel,
+    body.focus-mode #printPanelWrap,
+    body.focus-mode .summary,
+    body.focus-mode .notice,
+    body.focus-mode .footer-note,
+    body.focus-mode .grid-heading { display:none !important; }
+    body.focus-mode main { padding-top:8px; }
     input[type="file"] { width:100%; min-height:42px; border:1px dashed var(--line); border-radius:12px; background:#fff; color:var(--ink); font-size:13px; padding:9px 12px; }
     .status-line { min-height:42px; display:flex; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:13px; line-height:1.35; }
     .status-line strong { color:var(--ink); }
@@ -339,27 +367,38 @@
       </select>
     </div>
     <div>
+      <label for="sourceProfile">Source</label>
+      <select id="sourceProfile">
+        <option value="secondary">Secondary</option>
+        <option value="primary">Primary</option>
+      </select>
+    </div>
+    <div>
       <label>Card detail</label>
-      <label class="check-control" for="detailToggle"><input type="checkbox" id="detailToggle" checked> Detailed view</label>
+      <label class="check-control" for="detailToggle"><input type="checkbox" id="detailToggle" checked> Detailed</label>
     </div>
     <div>
       <label>Actions</label>
       <div class="button-row">
         <button id="downloadCsv">CSV</button>
-        <button id="copySummary">Copy summary</button>
+        <button id="copySummary">Copy</button>
         <button class="primary" id="printCurrent" type="button">Print</button>
+        <button id="togglePrintPanel" type="button" aria-expanded="false" aria-controls="printPanelWrap">Print setup</button>
+        <button id="toggleDataPanel" type="button" aria-expanded="false" aria-controls="dataPanel">Data</button>
+        <button id="toggleFocus" type="button" aria-pressed="false" title="Hide everything except the grid">Focus</button>
       </div>
     </div>
   </section>
 
-  <section class="xml-source" aria-label="XML data source">
-    <div>
-      <label for="sourceProfile">Timetable source</label>
-      <select id="sourceProfile">
-        <option value="secondary">Secondary XML</option>
-        <option value="primary">Primary XML</option>
-      </select>
-    </div>
+  <div class="context-bar">
+    <div class="context-title"><strong id="activeTitle">Timetable</strong> <span class="subtitle" id="activeSubtitle"></span></div>
+    <div class="subtitle" id="sourceNote"></div>
+  </div>
+  <!-- Always visible. The Friday coverage warning surfaces here, so it must not collapse
+       away with the rest of the data controls. -->
+  <div class="status-line" id="xmlStatus">Loading XML…</div>
+
+  <section class="xml-source" id="dataPanel" aria-label="XML data source" hidden>
     <div>
       <label for="xmlFile">Manual XML load for selected source</label>
       <input type="file" id="xmlFile" accept=".xml,text/xml,application/xml">
@@ -372,56 +411,49 @@
       <label>Expected file</label>
       <button id="copyXmlName" type="button">Copy filename</button>
     </div>
-    <div class="status-line" id="xmlStatus">Loading XML…</div>
   </section>
 
-  <section class="print-panel" aria-label="Print options">
-    <div>
-      <label for="printType">Print one page per</label>
-      <select id="printType">
-        <option value="class">Class</option>
-        <option value="teacher">Teacher</option>
-        <option value="subject">Subject</option>
-      </select>
-    </div>
-    <div>
-      <label for="printSearch">Filter the list</label>
-      <input type="search" id="printSearch" placeholder="Type to filter…">
-    </div>
-    <div>
-      <label>Selection</label>
-      <div class="button-row">
-        <button id="printSelectAll" type="button">All</button>
-        <button id="printSelectNone" type="button">None</button>
+  <div id="printPanelWrap" hidden>
+    <section class="print-panel" aria-label="Print options">
+      <div>
+        <label for="printType">Print one page per</label>
+        <select id="printType">
+          <option value="class">Class</option>
+          <option value="teacher">Teacher</option>
+          <option value="subject">Subject</option>
+        </select>
       </div>
-    </div>
-    <div>
-      <label>Output</label>
-      <div class="button-row">
-        <button id="printSelected" class="primary" type="button">Print selected</button>
+      <div>
+        <label for="printSearch">Filter the list</label>
+        <input type="search" id="printSearch" placeholder="Type to filter…">
       </div>
-    </div>
-    <div class="print-count" id="printCount"></div>
-  </section>
-  <div class="print-list" id="printList"></div>
-
-  <section class="viewer-title">
-    <div>
-      <h2 id="activeTitle">Timetable</h2>
-      <div class="subtitle" id="activeSubtitle"></div>
-    </div>
-    <div class="subtitle" id="sourceNote"></div>
-  </section>
+      <div>
+        <label>Selection</label>
+        <div class="button-row">
+          <button id="printSelectAll" type="button">All</button>
+          <button id="printSelectNone" type="button">None</button>
+        </div>
+      </div>
+      <div>
+        <label>Output</label>
+        <div class="button-row">
+          <button id="printSelected" class="primary" type="button">Print selected</button>
+        </div>
+      </div>
+      <div class="print-count" id="printCount"></div>
+    </section>
+    <div class="print-list" id="printList"></div>
+  </div>
 
   <div class="grids-row">
     <div class="grid-col grid-col--main">
-      <h3 class="grid-heading">Monday&ndash;Thursday</h3>
+      <!-- No heading: the column headers already read Monday..Thursday. -->
       <section class="table-wrap">
         <table id="ttTable" aria-label="Timetable grid (Monday to Thursday)"></table>
       </section>
     </div>
     <div class="grid-col grid-col--fri" id="fridayCol">
-      <h3 class="grid-heading grid-heading--fri">Friday <span class="grid-heading-note">shortened day &middot; no mentor</span></h3>
+      <div class="grid-note grid-note--fri">Friday &middot; shortened day, no mentor</div>
       <section class="table-wrap">
         <table id="ttFridayTable" aria-label="Friday timetable grid"></table>
       </section>
@@ -1206,6 +1238,8 @@ function setXmlStatus(message, isError=false) {
   if (!el) return;
   el.innerHTML = message;
   el.style.color = isError ? '#9f2f2f' : '';
+  // A wrapped warning changes the status line's height, which moves the grid.
+  if (typeof syncGridHeight === 'function') syncGridHeight();
 }
 async function loadXmlFromDefault() {
   const config = sourceConfig();
@@ -2159,6 +2193,77 @@ function renderEvidenceBlocks() {
 }
 
 
+// --- Viewer layout --------------------------------------------------------
+// The controls used to push the grid 947px down a 768px viewport, so no timetable was
+// visible on load at all. Setup panels now start collapsed and the grid is sized to
+// whatever viewport is left, rather than being pushed below the fold.
+const PANEL_STATE_KEY = 'ristt.panels.v1';
+const dataPanel = document.getElementById('dataPanel');
+const printPanelWrap = document.getElementById('printPanelWrap');
+const toggleDataPanelBtn = document.getElementById('toggleDataPanel');
+const togglePrintPanelBtn = document.getElementById('togglePrintPanel');
+const toggleFocusBtn = document.getElementById('toggleFocus');
+
+function readPanelState() {
+  try { return JSON.parse(localStorage.getItem(PANEL_STATE_KEY)) || {}; } catch { return {}; }
+}
+function writePanelState(patch) {
+  try { localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({ ...readPanelState(), ...patch })); } catch {}
+}
+// Measure where the grid actually starts and hand it to CSS, so .table-wrap fills the rest
+// of the viewport instead of running off the bottom of the page.
+// Reserve only the chrome that STAYS on screen — the sticky toolbar. Sizing against the
+// grid's document offset instead would freeze the grid at its unscrolled height, so
+// scrolling the header away reclaimed nothing.
+function syncGridHeight() {
+  const toolbar = document.querySelector('.toolbar');
+  if (!toolbar) return;
+  const reserve = Math.round(toolbar.getBoundingClientRect().height) + 26;
+  document.documentElement.style.setProperty('--grid-top', `${reserve}px`);
+}
+function setPanel(panel, button, open) {
+  if (!panel || !button) return;
+  panel.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+  syncGridHeight();
+}
+function setFocusMode(on) {
+  document.body.classList.toggle('focus-mode', on);
+  toggleFocusBtn?.setAttribute('aria-pressed', String(on));
+  syncGridHeight();
+}
+toggleDataPanelBtn?.addEventListener('click', () => {
+  const open = dataPanel.hidden;
+  setPanel(dataPanel, toggleDataPanelBtn, open);
+  writePanelState({ data: open });
+});
+togglePrintPanelBtn?.addEventListener('click', () => {
+  const open = printPanelWrap.hidden;
+  setPanel(printPanelWrap, togglePrintPanelBtn, open);
+  writePanelState({ print: open });
+});
+toggleFocusBtn?.addEventListener('click', () => {
+  const on = !document.body.classList.contains('focus-mode');
+  setFocusMode(on);
+  writePanelState({ focus: on });
+});
+// Escape leaves focus mode: with the header hidden the toolbar button is the only other
+// way out, and it is easy to miss.
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) {
+    setFocusMode(false);
+    writePanelState({ focus: false });
+  }
+});
+window.addEventListener('resize', syncGridHeight);
+function restoreViewerLayout() {
+  const state = readPanelState();
+  setPanel(dataPanel, toggleDataPanelBtn, !!state.data);
+  setPanel(printPanelWrap, togglePrintPanelBtn, !!state.print);
+  setFocusMode(!!state.focus);
+  syncGridHeight();
+}
+
 function updateSourceUi() {
   const config = sourceConfig();
   if (sourceProfile && sourceProfile.value !== activeSourceKey) sourceProfile.value = activeSourceKey;
@@ -2180,6 +2285,7 @@ async function refreshAfterDataLoad(keepSelection=false) {
   // Selection defaults to everything in the newly loaded source.
   resetPrintSelection();
   renderPrintList();
+  syncGridHeight();
 }
 async function initViewer() {
   const xmlFile = document.getElementById('xmlFile');
@@ -2224,8 +2330,10 @@ async function initViewer() {
     }
   });
 
+  restoreViewerLayout();
   await loadXmlFromDefault();
   await refreshAfterDataLoad(false);
+  syncGridHeight();
 }
 initViewer();
 </script>
