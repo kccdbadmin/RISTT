@@ -265,6 +265,31 @@
     .sc-lesson { background:#eaf4ff; color:#2b4a72; }
     .sc-clash { background:#ffd9d9; color:#8a1f1f; font-weight:900; }
     .sc-divhead { background:#eef2f7 !important; font-weight:900; color:#14213d; text-transform:uppercase; letter-spacing:.06em; font-size:10px; }
+
+    /* --- Both-divisions timeline: hour columns, cards free-floating at real times --- */
+    .tl { position:relative; overflow:auto; max-height:calc(100vh - 300px); border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .tl-inner { position:relative; min-width:820px; }
+    .tl-row { display:grid; grid-template-columns:var(--tl-label,112px) 1fr; position:relative; z-index:1; border-bottom:1px solid #eef2f7; }
+    .tl-row:last-child { border-bottom:0; }
+    .tl-label { position:sticky; left:0; z-index:6; background:#fbfcfe; border-right:1px solid var(--line); padding:2px 7px; font-size:11px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; }
+    /* One faint rule per hour, sized from --hours so it always lines up with the header. */
+    .tl-track { position:relative; height:24px; background-image:linear-gradient(to right, #e6edf5 1px, transparent 1px); background-size:calc(100% / var(--hours,8)) 100%; }
+    .tl-head { position:sticky; top:0; z-index:10; background:#f7fafd; border-bottom:1px solid var(--line); }
+    .tl-head .tl-track { height:28px; }
+    .tl-head .tl-label { background:#f7fafd; font-size:11px; }
+    .tl-hour { position:absolute; top:0; bottom:0; display:flex; align-items:center; padding-left:4px; font-size:10px; font-weight:750; color:var(--muted); border-left:1px solid var(--line); }
+    .tl-card { position:absolute; top:2px; bottom:2px; z-index:2; border-radius:4px; padding:0 4px; font-size:10px; line-height:1; display:flex; align-items:center; overflow:hidden; white-space:nowrap; border-left:3px solid rgba(20,33,61,.18); }
+    .tl-card.is-lesson { background:#eaf4ff; color:#2b4a72; }
+    .tl-card.is-break { background:#ffe6cc; color:#8a3d00; font-weight:850; }
+    .tl-card.is-lunch { background:#ffd4ad; color:#7a3400; font-weight:850; }
+    .tl-card.is-clash { background:#ffcdcd; color:#8a1f1f; font-weight:900; border-left-color:#cc3333; }
+    .tl-card.is-dim { background:#f6f8fb; color:#c3ccd8; border-left-color:#e3e9f0; }
+    .tl-divhead { grid-column:1 / -1; position:sticky; left:0; background:#eef2f7; color:#14213d; font-weight:900; font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding:3px 8px; }
+    /* Overlap bands sit above the cards at low alpha so they tint the whole window. */
+    /* Start below the sticky header so the hour ruler is never tinted. */
+    .tl-bands { position:absolute; top:29px; bottom:0; left:var(--tl-label,112px); right:0; z-index:5; pointer-events:none; }
+    .tl-band { position:absolute; top:0; bottom:0; background:rgba(220,60,60,.16); border-left:1px dashed rgba(190,40,40,.65); border-right:1px dashed rgba(190,40,40,.65); }
+    .tl-band span { position:absolute; top:2px; left:4px; font-size:9px; font-weight:900; color:#96201f; }
     .school-legend { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; font-size:12px; color:var(--muted); align-items:center; }
     .school-legend span.key { display:inline-flex; align-items:center; gap:5px; }
     .school-legend i { width:14px; height:12px; border-radius:3px; display:inline-block; border:1px solid var(--line); }
@@ -541,7 +566,7 @@
         </div>
         <div>
           <label>Display</label>
-          <label class="check-control" for="allBreaksOnly"><input type="checkbox" id="allBreaksOnly" checked> Breaks only</label>
+          <label class="check-control" for="allBreaksOnly"><input type="checkbox" id="allBreaksOnly"> Breaks only</label>
         </div>
         <div>
           <label>Actions</label>
@@ -555,15 +580,14 @@
         <table id="allClashTable" class="allocation-table" aria-label="Break overlaps between divisions"></table>
       </section>
       <h3 class="grid-heading">Every class by clock time</h3>
-      <section class="table-wrap school-wrap">
-        <table id="allSchoolTable" class="school-table" aria-label="All classes by clock time"></table>
-      </section>
+      <div class="tl" id="allTimeline"></div>
       <div class="school-legend">
+        <span class="key"><i style="background:#eaf4ff"></i> Lesson</span>
         <span class="key"><i style="background:#ffe6cc"></i> Break</span>
         <span class="key"><i style="background:#ffd4ad"></i> Lunch</span>
-        <span class="key"><i style="background:#ffd9d9"></i> Both divisions on break</span>
-        <span class="key"><i style="background:#eaf4ff"></i> Lesson</span>
-        <span class="key"><i style="background:#eef0f3"></i> Not in school</span>
+        <span class="key"><i style="background:#ffcdcd"></i> On break while the other division is too</span>
+        <span class="key"><i style="background:rgba(220,60,60,.16)"></i> Overlap window</span>
+        <span>Columns are one hour; cards sit at their real start and end time.</span>
       </div>
     </div>
   </section>
@@ -2335,9 +2359,10 @@ function clashesForDay(dayKey) {
   return merged;
 }
 function renderAllSchool() {
-  if (!allSchoolTable) return;
+  const timeline = document.getElementById('allTimeline');
+  if (!timeline) return;
   if (!DATA_CACHE.has('secondary') || !DATA_CACHE.has('primary')) {
-    allSchoolTable.innerHTML = '<tbody><tr><td class="allocation-empty">Loading both timetables…</td></tr></tbody>';
+    timeline.innerHTML = '<div class="allocation-empty">Loading both timetables…</div>';
     return;
   }
   if (allDay && !allDay.options.length) {
@@ -2347,51 +2372,54 @@ function renderAllSchool() {
   const breaksOnly = !!allBreaksOnly?.checked;
   const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)]
     .filter(r => r.segments.length);
-  const marks = uniq(rows.flatMap(r => r.segments.flatMap(s => [s.s, s.e]))).sort((a, b) => a - b);
-  const cols = [];
-  for (let i = 0; i < marks.length - 1; i++) cols.push([marks[i], marks[i + 1]]);
-  if (!cols.length) {
-    allSchoolTable.innerHTML = '<tbody><tr><td class="allocation-empty">No timetabled activity on this day.</td></tr></tbody>';
+  if (!rows.length) {
+    timeline.innerHTML = '<div class="allocation-empty">No timetabled activity on this day.</div>';
     return;
   }
-  const totalMins = marks[marks.length - 1] - marks[0];
-  const atBreak = cols.map(([s, e]) => {
-    const mid = (s + e) / 2;
-    const on = rows.filter(r => r.segments.some(x => x.kind === 'break' && x.s <= mid && x.e > mid));
-    return { secondary: on.filter(r => r.division === 'Secondary').length,
-             primary: on.filter(r => r.division === 'Primary').length };
-  });
+  // Whole hours across the widest span either division runs, so the ruler is regular even
+  // though the two divisions start and finish at different times.
+  const times = rows.flatMap(r => r.segments.flatMap(s => [s.s, s.e]));
+  const dayStart = Math.floor(Math.min(...times) / 60) * 60;
+  const dayEnd = Math.ceil(Math.max(...times) / 60) * 60;
+  const span = dayEnd - dayStart;
+  const hours = span / 60;
+  const at = t => ((t - dayStart) / span * 100).toFixed(3);
+  const wide = (s, e) => ((e - s) / span * 100).toFixed(3);
 
-  let head = `<thead><tr><th>Class</th>${cols.map(([s, e]) =>
-    `<th style="width:${((e - s) / totalMins * 92).toFixed(2)}%"><div class="sc-pnum">${esc(minToHhmm(s))}</div><div class="sc-ptime">${esc(e - s)}m</div></th>`).join('')}</tr>`;
-  head += `<tr class="sc-countrow"><th>At break</th>${atBreak.map(b => {
-    const clash = b.secondary > 0 && b.primary > 0;
-    const total = b.secondary + b.primary;
-    const cls = clash ? 'is-hot' : total ? 'is-some' : 'is-none';
-    return `<th class="sc-count ${cls}" title="Secondary ${b.secondary}, Primary ${b.primary}">${total ? `${esc(b.secondary)}/${esc(b.primary)}` : '0'}</th>`;
-  }).join('')}</tr></thead>`;
+  const clashes = clashesForDay(dayKey);
+  const inClash = (s, e) => clashes.some(c => c.s < e && c.e > s);
+
+  let head = '<div class="tl-row tl-head"><div class="tl-label">Class</div><div class="tl-track">';
+  for (let t = dayStart; t < dayEnd; t += 60) {
+    head += `<div class="tl-hour" style="left:${at(t)}%;width:${(100 / hours).toFixed(3)}%">${esc(minToHhmm(t))}</div>`;
+  }
+  head += '</div></div>';
+
+  const bands = `<div class="tl-bands">${clashes.map(c =>
+    `<div class="tl-band" style="left:${at(c.s)}%;width:${wide(c.s, c.e)}%" title="${esc(minToHhmm(c.s))}–${esc(minToHhmm(c.e))}: ${esc(c.secondary)} Secondary + ${esc(c.primary)} Primary"><span>${esc(c.secondary + c.primary)}</span></div>`).join('')}</div>`;
 
   let body = '';
   let lastDivision = '';
-  rows.forEach(r => {
+  for (const r of rows) {
     if (r.division !== lastDivision) {
       lastDivision = r.division;
-      body += `<tr><th class="sc-divhead">${esc(r.division)}</th><td class="sc-divhead" colspan="${cols.length}">${esc(r.division)} &mdash; ${esc(rows.filter(x => x.division === r.division).length)} classes</td></tr>`;
+      const count = rows.filter(x => x.division === lastDivision).length;
+      body += `<div class="tl-row"><div class="tl-divhead">${esc(lastDivision)} &mdash; ${esc(count)} classes</div></div>`;
     }
-    body += `<tr><th title="${esc(r.name)}">${esc(r.short)}</th>${cols.map(([s, e], i) => {
-      const mid = (s + e) / 2;
-      const seg = r.segments.find(x => x.s <= mid && x.e > mid);
-      if (!seg) return '<td class="sc-cell sc-off"></td>';
+    const cards = r.segments.slice().sort((a, b) => a.s - b.s).map(seg => {
+      let cls, text;
       if (seg.kind === 'break') {
-        const clash = atBreak[i].secondary > 0 && atBreak[i].primary > 0;
-        const kind = clash ? 'sc-clash' : /lunch/i.test(seg.label) ? 'sc-lunch' : 'sc-break';
-        return `<td class="sc-cell ${kind}" title="${esc(seg.label)} ${esc(minToHhmm(seg.s))}–${esc(minToHhmm(seg.e))}">${esc(seg.label.replace(/\s*PYP$/i, ''))}</td>`;
+        cls = inClash(seg.s, seg.e) ? 'is-clash' : /lunch/i.test(seg.label) ? 'is-lunch' : 'is-break';
+        text = seg.label.replace(/\s*PYP$/i, '');
+      } else {
+        cls = breaksOnly ? 'is-dim' : 'is-lesson';
+        text = seg.label.split(',')[0];
       }
-      if (breaksOnly) return '<td class="sc-cell sc-dim">·</td>';
-      return `<td class="sc-cell sc-lesson" title="${esc(seg.label)}">${esc(seg.label.split(',')[0])}</td>`;
-    }).join('')}</tr>`;
-  });
-  allSchoolTable.innerHTML = `${head}<tbody>${body}</tbody>`;
+      return `<div class="tl-card ${cls}" style="left:${at(seg.s)}%;width:${wide(seg.s, seg.e)}%" title="${esc(seg.label)} · ${esc(minToHhmm(seg.s))}–${esc(minToHhmm(seg.e))}">${esc(text)}</div>`;
+    }).join('');
+    body += `<div class="tl-row"><div class="tl-label" title="${esc(r.name)}">${esc(r.short)}</div><div class="tl-track">${cards}</div></div>`;
+  }
+  timeline.innerHTML = `<div class="tl-inner" style="--hours:${esc(hours)}">${head}${bands}${body}</div>`;
 
   // Clash table spans the whole week, not just the shown day.
   const weekly = DAY_ORDER.map(k => ({ key: k, name: (DAY_FALLBACK.find(d => d.key === k) || {}).name, list: clashesForDay(k) }))
