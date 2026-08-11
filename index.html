@@ -241,6 +241,31 @@
     .alloc-muted { color:var(--muted); font-size:12px; line-height:1.35; }
     .allocation-empty { padding:20px; color:var(--muted); }
 
+    /* --- Whole school grid: classes down, periods across --- */
+    .school-controls { display:grid; grid-template-columns:auto auto auto auto 1fr; gap:12px; align-items:end; margin:14px 0; }
+    .school-wrap { max-height:calc(100vh - 300px); }
+    .school-table { min-width:900px; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+    .school-table th, .school-table td { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:3px 4px; font-size:11px; line-height:1.2; vertical-align:middle; }
+    .school-table thead th { position:sticky; top:0; z-index:14; background:#f9fbfd; text-align:center; box-shadow:0 1px 0 var(--line); }
+    .school-table thead tr.sc-countrow th { top:38px; z-index:13; background:#f4f7fb; font-size:11px; }
+    .school-table tbody th { position:sticky; left:0; z-index:8; background:#fbfcfe; text-align:left; font-weight:850; white-space:nowrap; width:104px; }
+    .school-table thead th:first-child { left:0; z-index:16; width:104px; text-align:left; }
+    .sc-pnum { font-weight:850; font-size:12px; }
+    .sc-ptime { color:var(--muted); font-size:9px; white-space:nowrap; }
+    .sc-cell { text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sc-break { background:#ffe6cc; color:#8a3d00; font-weight:850; }
+    .sc-lunch { background:#ffd4ad; color:#7a3400; font-weight:850; }
+    .sc-off { background:#eef0f3; }
+    .sc-empty { color:#c3ccd8; }
+    .sc-dim { color:#cfd6df; background:#fcfdfe; }
+    .sc-count { font-weight:850; }
+    .sc-count.is-hot { background:#ffd9d9; color:#8a1f1f; }
+    .sc-count.is-some { background:#fff1dd; color:#8a5300; }
+    .sc-count.is-none { color:#aab4c0; font-weight:600; }
+    .school-legend { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; font-size:12px; color:var(--muted); align-items:center; }
+    .school-legend span.key { display:inline-flex; align-items:center; gap:5px; }
+    .school-legend i { width:14px; height:12px; border-radius:3px; display:inline-block; border:1px solid var(--line); }
+
     /* --- Print selection panel (screen only) --- */
     .print-panel { margin:12px 0 0; display:grid; grid-template-columns:.85fr 1.2fr auto auto 1fr; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:12px 14px; box-shadow:0 10px 30px rgba(15,35,55,.04); }
     .print-list { margin:10px 0 0; max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:14px; background:#fff; padding:8px; display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:2px; }
@@ -338,6 +363,7 @@
   <nav class="tab-nav" aria-label="Viewer sections">
     <button class="tab-btn" data-section="timetableSection" aria-selected="true">Timetable viewer</button>
     <button class="tab-btn" data-section="scheduleSection" aria-selected="false">Daily schedule</button>
+    <button class="tab-btn" data-section="schoolSection" aria-selected="false">Whole school</button>
     <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
@@ -468,6 +494,36 @@
   </div>
   <div class="footer-note" id="footerNote"></div>
 
+  </section>
+
+  <section id="schoolSection" class="page-section" aria-label="Whole school timetable">
+    <div class="allocation-panel">
+      <h2>Whole school</h2>
+      <p>Every class on one grid for a single day, using short class names, so break and lunch placement can be checked across the school at a glance. The <strong>At break</strong> row counts how many classes are on break or lunch in each period — that is where a clash shows up.</p>
+      <div class="school-controls">
+        <div>
+          <label for="schoolDay">Day</label>
+          <select id="schoolDay"></select>
+        </div>
+        <div>
+          <label for="schoolGrade">Grade band</label>
+          <select id="schoolGrade"><option value="all">All</option></select>
+        </div>
+        <div>
+          <label>Display</label>
+          <label class="check-control" for="schoolBreaksOnly"><input type="checkbox" id="schoolBreaksOnly"> Breaks only</label>
+        </div>
+        <div>
+          <label>Actions</label>
+          <div class="button-row"><button id="schoolCsv" type="button">CSV</button></div>
+        </div>
+        <div class="print-count" id="schoolNote"></div>
+      </div>
+      <section class="summary" id="schoolStats"></section>
+      <section class="table-wrap school-wrap">
+        <table id="schoolTable" class="school-table" aria-label="Whole school grid"></table>
+      </section>
+    </div>
   </section>
 
   <section id="teacherAllocationSection" class="page-section" aria-label="Teacher allocations">
@@ -1957,6 +2013,183 @@ allocationLoadFilter?.addEventListener('change', renderTeacherAllocations);
 allocationSort?.addEventListener('change', renderTeacherAllocations);
 downloadAllocationCsvButton?.addEventListener('click', downloadAllocationCsv);
 
+// --- Whole school ---------------------------------------------------------
+// Classes down, periods across, one day at a time. Built for one question: are break and
+// lunch staggered, or do the same periods empty the whole school at once?
+const schoolDay = document.getElementById('schoolDay');
+const schoolGrade = document.getElementById('schoolGrade');
+const schoolBreaksOnly = document.getElementById('schoolBreaksOnly');
+const schoolTable = document.getElementById('schoolTable');
+const schoolStats = document.getElementById('schoolStats');
+const schoolNote = document.getElementById('schoolNote');
+
+// The XML's own short names are already unique abbreviations ("1CK", "EY1Gazelle",
+// "MSandCats"), so use them verbatim — splitting on whitespace would turn
+// "EY1Arabian Wolf" into "EY1Arabian".
+function abbrevClassName(item) {
+  return textClean(item.short) || textClean(item.name) || item.id;
+}
+// gradeLevelFromClass needs a leading digit, so it hands back the whole class name for
+// Early Years and Mini groups. Band them properly for the filter.
+function schoolBand(name) {
+  const value = textClean(name);
+  if (/^mini\b/i.test(value)) return 'Mini';
+  const ey = value.match(/^EY\s*([12])/i);
+  if (ey) return `EY${ey[1]}`;
+  return gradeLevelFromClass(value);
+}
+function schoolClasses() {
+  const band = schoolGrade?.value || 'all';
+  return (DATA.selectors.class || []).filter(c => band === 'all' || schoolBand(c.name) === band);
+}
+function populateSchoolControls() {
+  if (!schoolDay || !schoolGrade) return;
+  const dayValue = schoolDay.value;
+  schoolDay.innerHTML = (DATA.days || []).map(d => `<option value="${esc(d.key)}">${esc(d.name)}</option>`).join('');
+  if (dayValue && DATA.days.some(d => d.key === dayValue)) schoolDay.value = dayValue;
+  const bandValue = schoolGrade.value;
+  const counts = new Map();
+  for (const c of (DATA.selectors.class || [])) {
+    const band = schoolBand(c.name);
+    counts.set(band, (counts.get(band) || 0) + 1);
+  }
+  const bands = Array.from(counts.keys()).sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+  schoolGrade.innerHTML = `<option value="all">All (${(DATA.selectors.class || []).length})</option>`
+    + bands.map(b => `<option value="${esc(b)}">${esc(b)} (${esc(counts.get(b))})</option>`).join('');
+  if (bandValue && bands.includes(bandValue)) schoolGrade.value = bandValue;
+}
+function renderSchoolGrid() {
+  if (!schoolTable) return;
+  populateSchoolControls();
+  const dayKey = schoolDay.value || (DATA.days[0] && DATA.days[0].key) || '';
+  const classes = schoolClasses();
+  const periods = DATA.periods || [];
+  const breaksOnly = !!schoolBreaksOnly?.checked;
+  const isFriday = dayKey === FRIDAY_KEY;
+  const fridaySchedule = FRIDAY_SCHEDULE[activeSourceKey] || [];
+  const fridayByPeriod = new Map(fridaySchedule.filter(r => r.ascPeriod).map(r => [r.ascPeriod, r]));
+
+  if (!classes.length || !periods.length) {
+    schoolTable.innerHTML = '<tbody><tr><td class="allocation-empty">Nothing to show for this source.</td></tr></tbody>';
+    if (schoolStats) schoolStats.innerHTML = '';
+    return;
+  }
+
+  // index this day's events by class and period
+  const slots = new Map();
+  for (const ev of DATA.events) {
+    if (ev.dayKey !== dayKey || !includesWeek(ev)) continue;
+    for (const classId of ev.classIds) {
+      const key = `${classId}|${ev.period}`;
+      if (!slots.has(key)) slots.set(key, []);
+      slots.get(key).push(ev);
+    }
+  }
+  const atBreak = new Map();
+  for (const c of classes) {
+    for (const p of periods) {
+      const arr = slots.get(`${c.id}|${p.period}`) || [];
+      if (arr.some(isNonTeachingSlot)) atBreak.set(p.period, (atBreak.get(p.period) || 0) + 1);
+    }
+  }
+
+  const timeFor = p => (isFriday && fridayByPeriod.has(p.period))
+    ? fridayByPeriod.get(p.period).time
+    : `${p.starttime}–${p.endtime}`;
+  const runsToday = p => !isFriday || !fridaySchedule.length || fridayByPeriod.has(p.period);
+
+  let head = `<thead><tr><th>Class</th>${periods.map(p =>
+    `<th><div class="sc-pnum">P${esc(p.period)}</div><div class="sc-ptime">${runsToday(p) ? esc(timeFor(p)) : '—'}</div></th>`).join('')}</tr>`;
+  head += `<tr class="sc-countrow"><th>At break</th>${periods.map(p => {
+    const n = atBreak.get(p.period) || 0;
+    const share = classes.length ? n / classes.length : 0;
+    const cls = n === 0 ? 'is-none' : share >= 0.5 ? 'is-hot' : 'is-some';
+    return `<th class="sc-count ${cls}">${esc(n)}</th>`;
+  }).join('')}</tr></thead>`;
+
+  const body = classes.map(c => {
+    const cells = periods.map(p => {
+      if (!runsToday(p)) return '<td class="sc-cell sc-off"></td>';
+      const arr = slots.get(`${c.id}|${p.period}`) || [];
+      const nonTeaching = arr.filter(isNonTeachingSlot);
+      if (nonTeaching.length) {
+        const label = nonTeaching[0].subject;
+        const kind = /lunch/i.test(label) ? 'sc-lunch' : 'sc-break';
+        return `<td class="sc-cell ${kind}" title="${esc(label)}">${esc(label.replace(/\s*PYP$/i, ''))}</td>`;
+      }
+      if (breaksOnly) return '<td class="sc-cell sc-dim">·</td>';
+      if (!arr.length) return '<td class="sc-cell sc-empty">–</td>';
+      const names = uniq(arr.map(ev => ev.subjectShort || ev.subject));
+      const text = names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
+      return `<td class="sc-cell" style="background:hsl(${esc(arr[0].subjectHue)},70%,95%)" title="${esc(names.join(', '))}">${esc(text)}</td>`;
+    }).join('');
+    return `<tr><th title="${esc(c.name)}">${esc(abbrevClassName(c))}</th>${cells}</tr>`;
+  }).join('');
+
+  schoolTable.innerHTML = `${head}<tbody>${body}</tbody>`;
+
+  // Headline numbers: the biggest simultaneous break is the thing worth seeing.
+  const busiest = Array.from(atBreak.entries()).sort((a, b) => b[1] - a[1])[0];
+  const distinctSlots = Array.from(atBreak.keys()).sort((a, b) => Number(a) - Number(b));
+  const withoutBreak = classes.filter(c => !periods.some(p =>
+    (slots.get(`${c.id}|${p.period}`) || []).some(isNonTeachingSlot)));
+  if (schoolStats) {
+    // With no break cards at all the division runs bell-schedule breaks, so "every class
+    // missing a break card" is the expected state, not a finding.
+    const bellOnly = !distinctSlots.length;
+    const gap = bellOnly
+      ? ['Break model', '—', 'Bell schedule, not timetabled']
+      : ['Classes with no break card', withoutBreak.length,
+         withoutBreak.length ? compactList(withoutBreak.map(abbrevClassName), 4).join(', ') : 'All covered'];
+    schoolStats.innerHTML = [
+      ['Classes shown', classes.length, 'On this day'],
+      ['Break periods used', distinctSlots.length, distinctSlots.length ? `P${distinctSlots.join(', P')}` : 'None timetabled'],
+      ['Largest simultaneous break', busiest ? `${busiest[1]}` : '—', busiest ? `Period ${busiest[0]} · ${Math.round(100 * busiest[1] / classes.length)}% of classes` : 'No timetabled breaks'],
+      gap
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (schoolNote) {
+    schoolNote.innerHTML = activeSourceKey === 'secondary'
+      ? '<span>Secondary mentor, break and lunch are <strong>school-wide bell events</strong>, identical for every class, so they are not timetabled cards and do not appear here. See the Daily schedule tab.</span>'
+      : '<span>Primary break and lunch are <strong>timetabled per class</strong>, so they can differ between year groups.</span>';
+  }
+}
+function downloadSchoolCsv() {
+  const dayKey = schoolDay.value;
+  const dayName = (DATA.days.find(d => d.key === dayKey) || {}).name || '';
+  const periods = DATA.periods || [];
+  const rows = [['Class', ...periods.map(p => `P${p.period}`)]];
+  const slots = new Map();
+  for (const ev of DATA.events) {
+    if (ev.dayKey !== dayKey || !includesWeek(ev)) continue;
+    for (const classId of ev.classIds) {
+      const key = `${classId}|${ev.period}`;
+      if (!slots.has(key)) slots.set(key, []);
+      slots.get(key).push(ev);
+    }
+  }
+  for (const c of schoolClasses()) {
+    rows.push([c.name, ...periods.map(p => {
+      const arr = slots.get(`${c.id}|${p.period}`) || [];
+      if (!arr.length) return '';
+      const nt = arr.filter(isNonTeachingSlot);
+      return nt.length ? nt[0].subject : uniq(arr.map(e => e.subject)).join(' / ');
+    })]);
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `whole_school_${activeSourceKey}_${dayName || 'day'}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+schoolDay?.addEventListener('change', renderSchoolGrid);
+schoolGrade?.addEventListener('change', renderSchoolGrid);
+schoolBreaksOnly?.addEventListener('change', renderSchoolGrid);
+document.getElementById('schoolCsv')?.addEventListener('click', downloadSchoolCsv);
+
 // --- Printing -------------------------------------------------------------
 // The screen grid is periods-as-rows split across two tables. For paper that wastes the
 // page, so printing transposes it: days as rows, periods as columns, one entity per sheet.
@@ -2282,6 +2515,7 @@ async function refreshAfterDataLoad(keepSelection=false) {
   render();
   renderTeacherAllocations();
   renderEvidenceBlocks();
+  renderSchoolGrid();
   // Selection defaults to everything in the newly loaded source.
   resetPrintSelection();
   renderPrintList();
