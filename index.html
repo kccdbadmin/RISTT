@@ -569,16 +569,40 @@
           <label class="check-control" for="allBreaksOnly"><input type="checkbox" id="allBreaksOnly"> Breaks only</label>
         </div>
         <div>
+          <label>Classes</label>
+          <div class="button-row"><button id="allClassToggle" type="button" aria-expanded="false" aria-controls="allClassPanel">Filter…</button></div>
+        </div>
+        <div>
           <label>Actions</label>
           <div class="button-row"><button id="allCsv" type="button">CSV</button></div>
         </div>
         <div class="print-count" id="allNote"></div>
       </div>
       <section class="summary" id="allStats"></section>
-      <h3 class="grid-heading">Overlapping break windows</h3>
-      <section class="table-wrap">
-        <table id="allClashTable" class="allocation-table" aria-label="Break overlaps between divisions"></table>
-      </section>
+      <div id="allClassPanel" hidden>
+        <section class="print-panel" aria-label="Class filter">
+          <div>
+            <label for="allClassSearch">Find a class</label>
+            <input type="search" id="allClassSearch" placeholder="Type to filter the list…">
+          </div>
+          <div>
+            <label>Quick select</label>
+            <div class="button-row">
+              <button id="allClassAll" type="button">All</button>
+              <button id="allClassNone" type="button">None</button>
+            </div>
+          </div>
+          <div>
+            <label>Division</label>
+            <div class="button-row">
+              <button id="allClassSec" type="button">Secondary only</button>
+              <button id="allClassPri" type="button">Primary only</button>
+            </div>
+          </div>
+          <div class="print-count" id="allClassCount"></div>
+        </section>
+        <div class="print-list" id="allClassList"></div>
+      </div>
       <h3 class="grid-heading">Every class by clock time</h3>
       <div class="tl" id="allTimeline"></div>
       <div class="school-legend">
@@ -2262,11 +2286,13 @@ document.getElementById('schoolCsv')?.addEventListener('click', downloadSchoolCs
 // on real minutes and columns are as wide as the time they cover.
 const allDay = document.getElementById('allDay');
 const allBreaksOnly = document.getElementById('allBreaksOnly');
-const allSchoolTable = document.getElementById('allSchoolTable');
-const allClashTable = document.getElementById('allClashTable');
 const allStats = document.getElementById('allStats');
 const allNote = document.getElementById('allNote');
 const DAY_ORDER = DAY_FALLBACK.map(d => d.key);
+// Hidden rather than shown, so an empty set means "everything visible" and a reload of
+// either export cannot silently blank the timeline.
+const allHiddenClasses = new Set();
+const allClassKey = row => `${row.division}|${row.name}`;
 
 function hhmmToMin(value) {
   const m = String(value || '').match(/(\d{1,2}):(\d{2})/);
@@ -2358,6 +2384,70 @@ function clashesForDay(dayKey) {
   }
   return merged;
 }
+function allClassRoster() {
+  const out = [];
+  for (const key of ['secondary', 'primary']) {
+    const data = DATA_CACHE.get(key);
+    if (!data) continue;
+    const division = key === 'secondary' ? 'Secondary' : 'Primary';
+    for (const c of data.selectors.class) out.push({ division, name: c.name, short: abbrevClassName(c) });
+  }
+  return out;
+}
+function renderAllClassList() {
+  const list = document.getElementById('allClassList');
+  const count = document.getElementById('allClassCount');
+  if (!list) return;
+  const roster = allClassRoster();
+  const q = String(document.getElementById('allClassSearch')?.value || '').trim().toLowerCase();
+  const items = roster.filter(r => !q
+    || r.name.toLowerCase().includes(q) || r.short.toLowerCase().includes(q) || r.division.toLowerCase().includes(q));
+  list.innerHTML = items.length
+    ? items.map(r => {
+        const key = allClassKey(r);
+        return `<label class="print-item"><input type="checkbox" value="${esc(key)}"${allHiddenClasses.has(key) ? '' : ' checked'}><span>${esc(r.short)} <span class="alloc-muted">${esc(r.division.slice(0, 3))}</span></span></label>`;
+      }).join('')
+    : '<div class="alloc-muted">No matches for that filter.</div>';
+  if (count) {
+    const shown = roster.length - roster.filter(r => allHiddenClasses.has(allClassKey(r))).length;
+    count.innerHTML = `<span>Showing <strong>${esc(shown)}</strong> of ${esc(roster.length)} classes</span>`;
+  }
+}
+function applyClassFilter(mutate) {
+  mutate();
+  renderAllClassList();
+  renderAllSchool();
+}
+// All/None act on whatever the search is currently showing, so a whole year group can be
+// dropped in two clicks; the division buttons always act on the full roster.
+const listedClassKeys = () => Array.from(document.querySelectorAll('#allClassList input[type="checkbox"]')).map(b => b.value);
+document.getElementById('allClassToggle')?.addEventListener('click', () => {
+  const panel = document.getElementById('allClassPanel');
+  const button = document.getElementById('allClassToggle');
+  const open = panel.hidden;
+  panel.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+  if (open) renderAllClassList();
+});
+document.getElementById('allClassSearch')?.addEventListener('input', renderAllClassList);
+document.getElementById('allClassList')?.addEventListener('change', event => {
+  const box = event.target.closest('input[type="checkbox"]');
+  if (!box) return;
+  applyClassFilter(() => { if (box.checked) allHiddenClasses.delete(box.value); else allHiddenClasses.add(box.value); });
+});
+document.getElementById('allClassAll')?.addEventListener('click', () =>
+  applyClassFilter(() => listedClassKeys().forEach(k => allHiddenClasses.delete(k))));
+document.getElementById('allClassNone')?.addEventListener('click', () =>
+  applyClassFilter(() => listedClassKeys().forEach(k => allHiddenClasses.add(k))));
+document.getElementById('allClassSec')?.addEventListener('click', () => applyClassFilter(() => {
+  allHiddenClasses.clear();
+  allClassRoster().filter(r => r.division !== 'Secondary').forEach(r => allHiddenClasses.add(allClassKey(r)));
+}));
+document.getElementById('allClassPri')?.addEventListener('click', () => applyClassFilter(() => {
+  allHiddenClasses.clear();
+  allClassRoster().filter(r => r.division !== 'Primary').forEach(r => allHiddenClasses.add(allClassKey(r)));
+}));
+
 function renderAllSchool() {
   const timeline = document.getElementById('allTimeline');
   if (!timeline) return;
@@ -2370,8 +2460,9 @@ function renderAllSchool() {
   }
   const dayKey = allDay?.value || DAY_ORDER[0];
   const breaksOnly = !!allBreaksOnly?.checked;
-  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)]
+  const everyRow = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)]
     .filter(r => r.segments.length);
+  const rows = everyRow.filter(r => !allHiddenClasses.has(allClassKey(r)));
   if (!rows.length) {
     timeline.innerHTML = '<div class="allocation-empty">No timetabled activity on this day.</div>';
     return;
@@ -2421,42 +2512,33 @@ function renderAllSchool() {
   }
   timeline.innerHTML = `<div class="tl-inner" style="--hours:${esc(hours)}">${head}${bands}${body}</div>`;
 
-  // Clash table spans the whole week, not just the shown day.
+  // Week-wide clash figures still drive the headline stats, even though the day on screen
+  // only shows its own bands.
   const weekly = DAY_ORDER.map(k => ({ key: k, name: (DAY_FALLBACK.find(d => d.key === k) || {}).name, list: clashesForDay(k) }))
     .filter(d => d.list.length);
-  if (allClashTable) {
-    allClashTable.innerHTML = weekly.length
-      ? `<thead><tr><th>Day</th><th>Window</th><th>Minutes</th><th>Secondary</th><th>Primary</th><th>Total classes</th><th>Primary groups</th><th>What</th></tr></thead><tbody>${
-        weekly.flatMap(d => d.list.map(w => `<tr>
-          <td><strong>${esc(d.name)}</strong></td>
-          <td class="allocation-teacher">${esc(minToHhmm(w.s))}–${esc(minToHhmm(w.e))}</td>
-          <td>${esc(w.mins)}</td>
-          <td>${esc(w.secondary)}</td>
-          <td>${esc(w.primary)}</td>
-          <td><div class="allocation-hours">${esc(w.secondary + w.primary)}</div></td>
-          <td><div class="alloc-stack">${compactList(w.primaryWho, 8).map(x => `<span class="alloc-pill">${esc(x)}</span>`).join('')}</div></td>
-          <td class="alloc-muted">${esc(w.labels.join(' + '))}</td></tr>`)).join('')}</tbody>`
-      : '<tbody><tr><td class="allocation-empty">No window where both divisions are on break at once.</td></tr></tbody>';
-  }
   if (allStats) {
     const all = weekly.flatMap(d => d.list);
     const worst = all.slice().sort((a, b) => (b.secondary + b.primary) - (a.secondary + a.primary))[0];
     const longest = all.slice().sort((a, b) => b.mins - a.mins)[0];
+    const shownSec = rows.filter(r => r.division === 'Secondary').length;
+    const shownPri = rows.filter(r => r.division === 'Primary').length;
     allStats.innerHTML = [
-      ['Classes in school', rows.length, `${DATA_CACHE.get('secondary').selectors.class.length} Secondary + ${DATA_CACHE.get('primary').selectors.class.length} Primary`],
+      ['Classes shown', `${rows.length}/${everyRow.length}`, `${shownSec} Secondary + ${shownPri} Primary`],
       ['Overlapping windows', all.length, all.length ? 'Both divisions on break together' : 'None all week'],
       ['Longest overlap', longest ? `${longest.mins}m` : '—', longest ? `${minToHhmm(longest.s)}–${minToHhmm(longest.e)}` : 'No overlap'],
       ['Most classes at once', worst ? worst.secondary + worst.primary : '—', worst ? `${worst.secondary} Secondary + ${worst.primary} Primary` : 'No overlap']
     ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
   }
   if (allNote) {
-    allNote.innerHTML = '<span>Columns are clock-time spans, not periods. <strong>At break</strong> reads Secondary/Primary; red marks a window where both are out at once.</span>';
+    allNote.innerHTML = '<span>Columns are one hour; cards sit at their real start and end time. Overlap bands are computed for the <strong>whole school</strong>, so filtering classes out cannot hide a clash.</span>';
   }
 }
 function downloadAllSchoolCsv() {
   const dayKey = allDay?.value || DAY_ORDER[0];
   const dayName = (DAY_FALLBACK.find(d => d.key === dayKey) || {}).name || 'day';
-  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)].filter(r => r.segments.length);
+  // Export what is on screen, filter included.
+  const rows = [...divisionSegments('secondary', dayKey), ...divisionSegments('primary', dayKey)]
+    .filter(r => r.segments.length && !allHiddenClasses.has(allClassKey(r)));
   const marks = uniq(rows.flatMap(r => r.segments.flatMap(s => [s.s, s.e]))).sort((a, b) => a - b);
   const cols = [];
   for (let i = 0; i < marks.length - 1; i++) cols.push([marks[i], marks[i + 1]]);
