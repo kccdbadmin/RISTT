@@ -241,6 +241,20 @@
     .alloc-muted { color:var(--muted); font-size:12px; line-height:1.35; }
     .allocation-empty { padding:20px; color:var(--muted); }
 
+    /* --- Class name generator: deliberately low-key, tucked to the right --- */
+    .tab-btn--utility { margin-left:auto; background:transparent; border-style:dashed; color:var(--muted); font-weight:700; }
+    .tab-btn--utility[aria-selected="true"] { background:var(--ink); color:#fff; border-style:solid; border-color:var(--ink); }
+    .cn-controls { display:grid; grid-template-columns:auto 1.2fr auto auto 1fr; gap:12px; align-items:end; margin:14px 0; }
+    .cn-table { min-width:960px; table-layout:auto; }
+    .cn-table th, .cn-table td { padding:7px 9px; vertical-align:top; font-size:13px; }
+    .cn-table thead th { position:sticky; top:0; z-index:12; background:#f9fbfd; text-align:left; white-space:nowrap; box-shadow:0 1px 0 var(--line); }
+    .cn-name { font-weight:850; color:#14213d; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .cn-slots { display:flex; flex-wrap:wrap; gap:4px; }
+    .cn-slot { border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:2px 7px; font-size:11px; font-weight:700; color:#334155; white-space:nowrap; }
+    .cn-week { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
+    .cn-muted { color:var(--muted); font-size:12px; }
+    .cn-skipped { margin-top:12px; border:1px solid #f3d7a3; background:var(--warning); color:#5f4208; padding:10px 12px; border-radius:14px; font-size:13px; }
+
     /* --- Whole school grid: classes down, periods across --- */
     .school-controls { display:grid; grid-template-columns:auto auto auto auto 1fr; gap:12px; align-items:end; margin:14px 0; }
     .school-wrap { max-height:calc(100vh - 300px); }
@@ -397,6 +411,7 @@
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
     <a class="tab-btn" href="https://kccdbadmin.github.io/CPOptions/" target="_blank" rel="noopener">CP options</a>
+    <button class="tab-btn tab-btn--utility" data-section="classNamesSection" aria-selected="false" title="Generate canonical class names for Secondary MYP">Class names</button>
   </nav>
 
   <section id="timetableSection" class="page-section active" aria-label="Timetable viewer">
@@ -613,6 +628,40 @@
         <span class="key"><i style="background:rgba(220,60,60,.16)"></i> Overlap window</span>
         <span>Columns are one hour; cards sit at their real start and end time.</span>
       </div>
+    </div>
+  </section>
+
+  <section id="classNamesSection" class="page-section" aria-label="Class name generator">
+    <div class="allocation-panel">
+      <h2>Class names</h2>
+      <p>Generates a canonical name for every Secondary MYP teaching class, in the form
+        <strong>Homerooms.Subject.Track</strong> &mdash; for example <strong>7ABC.Arabic.B1</strong>.
+        Grades 6&ndash;10 only; DP, CP and Primary are out of scope. Alternating Week A / Week B
+        records for the same class are merged into one.</p>
+      <div class="cn-controls">
+        <div>
+          <label>Generate</label>
+          <div class="button-row"><button id="cnGenerate" class="primary" type="button">Generate names</button></div>
+        </div>
+        <div>
+          <label for="cnSearch">Filter</label>
+          <input type="search" id="cnSearch" placeholder="Name, homeroom, subject or teacher…">
+        </div>
+        <div>
+          <label>Show on cards</label>
+          <label class="check-control" for="cnOnCards"><input type="checkbox" id="cnOnCards"> Use on timetable</label>
+        </div>
+        <div>
+          <label>Actions</label>
+          <div class="button-row"><button id="cnCsv" type="button">CSV</button></div>
+        </div>
+        <div class="print-count" id="cnCount"></div>
+      </div>
+      <section class="summary" id="cnStats"></section>
+      <section class="table-wrap allocation-wrap">
+        <table id="cnTable" class="allocation-table cn-table" aria-label="Generated class names"></table>
+      </section>
+      <div id="cnSkipped"></div>
     </div>
   </section>
 
@@ -1488,7 +1537,9 @@ function groupForSelectedClass(ev) {
   return gs.length ? gs.join(', ') : ev.groups.join(', ');
 }
 function cardHtml(ev) {
-  const subject = ev.subject || ev.subjectShort || 'Lesson';
+  // Toggled from the Class names tab. Replaces the subject text rather than adding a
+  // line, so card height is unchanged.
+  const subject = (cnShowOnCards && CN_BY_LESSON.get(ev.lessonId)) || ev.subject || ev.subjectShort || 'Lesson';
   // Break/lunch arrive as ordinary subject cards in PYP exports. Render them as a slot so
   // they read as non-teaching time rather than as a lesson to be taught.
   if (isNonTeachingSlot(ev)) {
@@ -2566,6 +2617,204 @@ document.querySelector('[data-section="allSchoolSection"]')?.addEventListener('c
   renderAllSchool();
 });
 
+// --- Class names ----------------------------------------------------------
+// Builds a canonical name per Secondary MYP teaching class: Homerooms.Subject.Track,
+// e.g. 7ABC.Arabic.B1. Grades 6-10 only. One aSc <lesson> is normally one class, but a
+// class taught in alternating weeks is recorded as two lessons, so those are merged first.
+const CN_ACRONYMS = new Set(['UAESS', 'MSC', 'PHE', 'BTEC', 'INS', 'MOE', 'CP', 'TOK', 'MCORE', 'ICT']);
+// Only these carry the native/non-native split. iStudy and MSC sit on AR-B groups and are
+// the B track; everything else (French, PHE, Maths...) takes no track letter at all.
+const CN_AB_FAMILY = /^(ARABIC|ISLAMIC|UAESS|iStudy|MSC)\b/i;
+const CN_STATE_KEY = 'ristt.classnames.v1';
+let CN_ROWS = [];
+let CN_BY_LESSON = new Map();
+let CN_SKIPPED = [];
+let cnShowOnCards = false;
+
+function cnTrack(subject) {
+  if (!CN_AB_FAMILY.test(subject)) return '';
+  if (/^(iStudy|MSC)\b/i.test(subject)) return 'B';
+  const m = String(subject).match(/\b([AB])\b/);
+  return m ? m[1] : '';
+}
+// Strip the MYP marker and the A/B (which moves to the tail), then de-shout ALLCAPS while
+// leaving genuine acronyms alone, so ARABIC A MYP becomes Arabic but UAESS A stays UAESS.
+function cnTidySubject(subject) {
+  const cleaned = String(subject || '').replace(/\bMYP\b/gi, '').replace(/\b[AB]\b/g, '').replace(/\s+/g, ' ').trim();
+  const words = cleaned.split(' ').map(w =>
+    (w.length > 3 && w === w.toUpperCase() && !CN_ACRONYMS.has(w.toUpperCase()))
+      ? w[0] + w.slice(1).toLowerCase() : w);
+  return words.join(' ') || String(subject || '');
+}
+function cnPrefix(classes) {
+  const parts = classes.map(c => String(c).match(/^(\d{1,2})([A-G])$/));
+  if (parts.some(p => !p) || !parts.every(p => p[1] === parts[0][1])) return classes.join('+');
+  return parts[0][1] + parts.map(p => p[2]).sort().join('');
+}
+const cnIsMYP = ev => ev.classes.length && ev.classes.every(c => /^(6|7|8|9|10)[A-G]$/.test(c));
+const cnIsElectiveBlock = subject => /^Block [A-D]$/i.test(String(subject || ''));
+
+function buildClassNames() {
+  if (activeSourceKey !== 'secondary') {
+    return { rows: [], skipped: [], scope: 'Class names are generated for the Secondary MYP timetable only. Switch the source to Secondary.' };
+  }
+  const lessons = new Map();
+  for (const ev of DATA.events) {
+    if (!lessons.has(ev.lessonId)) lessons.set(ev.lessonId, { ev, slots: [] });
+    lessons.get(ev.lessonId).slots.push(`${ev.dayShort} P${ev.period}`);
+  }
+  const all = Array.from(lessons.values());
+  const skipped = all.filter(x => !x.ev.classes.length).map(x => x.ev);
+  // Merge the Week A / Week B twins: identical cohort, subject, group and teacher.
+  const merged = new Map();
+  for (const item of all.filter(x => cnIsMYP(x.ev))) {
+    const e = item.ev;
+    const key = [e.classes.join('+'), e.subject, uniq(e.groups).join(','), e.teachers.join(',')].join('::');
+    if (!merged.has(key)) merged.set(key, { ev: e, lessonIds: [], slots: [], weeks: new Set() });
+    const m = merged.get(key);
+    m.lessonIds.push(e.lessonId);
+    m.slots.push(...item.slots);
+    m.weeks.add(e.weekShort || 'All');
+  }
+  const rows = Array.from(merged.values()).map(m => {
+    const e = m.ev;
+    const elective = cnIsElectiveBlock(e.subject);
+    return {
+      ev: m.ev,
+      lessonIds: m.lessonIds,
+      weeks: m.weeks,
+      slots: uniq(m.slots),
+      elective,
+      track: elective ? '' : cnTrack(e.subject),
+      base: elective ? (uniq(e.groups)[0] || e.subject) : `${cnPrefix(e.classes)}.${cnTidySubject(e.subject)}`
+    };
+  });
+  // The index restarts within each cohort+subject+track and is omitted when unique. Ordering
+  // is by teacher then group name, NOT by timetable position, so moving a lesson in aSc
+  // cannot silently renumber classes that rosters may already be keyed to.
+  const buckets = new Map();
+  for (const r of rows) {
+    const key = `${r.base}|${r.track}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(r);
+  }
+  for (const list of buckets.values()) {
+    list.sort((a, b) => a.ev.teachers.join(',').localeCompare(b.ev.teachers.join(','))
+      || uniq(a.ev.groups).join(',').localeCompare(uniq(b.ev.groups).join(','), undefined, { numeric: true }));
+    list.forEach((r, i) => {
+      const n = list.length > 1 ? String(i + 1) : '';
+      r.name = r.elective ? r.base
+        : r.track ? `${r.base}.${r.track}${n}`
+          : (n ? `${r.base}.${n}` : r.base);
+    });
+  }
+  rows.sort((a, b) => naturalKey(a.name).localeCompare(naturalKey(b.name)));
+  return { rows, skipped, scope: '' };
+}
+function refreshClassNames() {
+  const built = buildClassNames();
+  CN_ROWS = built.rows;
+  CN_SKIPPED = built.skipped;
+  CN_BY_LESSON = new Map();
+  for (const r of CN_ROWS) for (const id of r.lessonIds) CN_BY_LESSON.set(id, r.name);
+  return built;
+}
+function cnFilteredRows() {
+  const q = String(document.getElementById('cnSearch')?.value || '').trim().toLowerCase();
+  if (!q) return CN_ROWS;
+  return CN_ROWS.filter(r => [r.name, r.ev.classes.join(' '), r.ev.subject, r.ev.teachers.join(' '), uniq(r.ev.groups).join(' ')]
+    .join(' ').toLowerCase().includes(q));
+}
+function renderClassNames(built) {
+  const table = document.getElementById('cnTable');
+  const stats = document.getElementById('cnStats');
+  const count = document.getElementById('cnCount');
+  const skippedBox = document.getElementById('cnSkipped');
+  if (!table) return;
+  if (built && built.scope) {
+    table.innerHTML = `<tbody><tr><td class="allocation-empty">${esc(built.scope)}</td></tr></tbody>`;
+    if (stats) stats.innerHTML = '';
+    if (count) count.innerHTML = '';
+    if (skippedBox) skippedBox.innerHTML = '';
+    return;
+  }
+  if (!CN_ROWS.length) {
+    table.innerHTML = '<tbody><tr><td class="allocation-empty">Press <strong>Generate names</strong> to build the list.</td></tr></tbody>';
+    if (stats) stats.innerHTML = '';
+    return;
+  }
+  const rows = cnFilteredRows();
+  table.innerHTML = `<thead><tr><th>Class name</th><th>Homerooms</th><th>aSc subject</th><th>aSc group</th><th>Teacher</th><th>When</th></tr></thead><tbody>${
+    rows.map(r => `<tr>
+      <td class="cn-name">${esc(r.name)}</td>
+      <td>${esc(r.ev.classes.join(', '))}</td>
+      <td class="cn-muted">${esc(r.ev.subject)}</td>
+      <td class="cn-muted">${esc(uniq(r.ev.groups).join(', ') || '—')}</td>
+      <td>${esc(r.ev.teachers.join(', ') || 'Unassigned')}</td>
+      <td><div class="cn-slots">${r.slots.map(s => `<span class="cn-slot">${esc(s)}</span>`).join('')}${
+        r.lessonIds.length > 1 ? '<span class="cn-slot cn-week">A/B merged</span>' : ''}</div></td>
+    </tr>`).join('')}</tbody>`;
+  const withTrack = CN_ROWS.filter(r => r.track).length;
+  const mergedCount = CN_ROWS.filter(r => r.lessonIds.length > 1).length;
+  const composite = CN_ROWS.filter(r => r.ev.classes.length > 1).length;
+  if (stats) {
+    stats.innerHTML = [
+      ['Class names', CN_ROWS.length, 'Secondary MYP, Grades 6-10'],
+      ['Multi-homeroom', composite, 'Drawn from more than one homeroom'],
+      ['With A/B track', withTrack, 'Arabic, Islamic, UAESS, iStudy, MSC'],
+      ['Week A/B merged', mergedCount, 'Two lesson records, one class']
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (count) count.innerHTML = `<span>Showing <strong>${esc(rows.length)}</strong> of ${esc(CN_ROWS.length)}</span>`;
+  if (skippedBox) {
+    // Held at module level: a filter re-render has no built object, and the notice
+    // must not vanish when the user types in the search box.
+    const skipped = CN_SKIPPED;
+    skippedBox.innerHTML = skipped.length
+      ? `<div class="cn-skipped"><strong>${esc(skipped.length)} lesson${skipped.length === 1 ? '' : 's'} skipped:</strong> no class attached, so no name can be built &mdash; ${esc(uniq(skipped.map(e => e.subject)).join(', '))}.</div>`
+      : '';
+  }
+}
+function downloadClassNamesCsv() {
+  const rows = [['Class name', 'Homerooms', 'aSc subject', 'aSc group', 'Teacher', 'Periods', 'Week A/B merged']];
+  for (const r of cnFilteredRows()) {
+    rows.push([r.name, r.ev.classes.join('; '), r.ev.subject, uniq(r.ev.groups).join('; '),
+      r.ev.teachers.join('; '), r.slots.join(' '), r.lessonIds.length > 1 ? 'yes' : 'no']);
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'class_names_secondary_myp.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function setClassNamesOnCards(on) {
+  cnShowOnCards = on;
+  const box = document.getElementById('cnOnCards');
+  if (box) box.checked = on;
+  try { localStorage.setItem(CN_STATE_KEY, JSON.stringify({ onCards: on })); } catch (err) { /* private mode */ }
+  if (on && !CN_ROWS.length) refreshClassNames();
+  render();
+}
+function restoreClassNamePref() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(CN_STATE_KEY)) || {}; } catch (err) { saved = {}; }
+  // Set the flag only: data has not loaded at this point, and refreshAfterDataLoad
+  // builds the names and re-renders once it has.
+  cnShowOnCards = !!saved.onCards;
+  const box = document.getElementById("cnOnCards");
+  if (box) box.checked = cnShowOnCards;
+}
+document.getElementById('cnGenerate')?.addEventListener('click', () => renderClassNames(refreshClassNames()));
+document.getElementById('cnSearch')?.addEventListener('input', () => renderClassNames());
+document.getElementById('cnCsv')?.addEventListener('click', downloadClassNamesCsv);
+document.getElementById('cnOnCards')?.addEventListener('change', e => setClassNamesOnCards(e.target.checked));
+document.querySelector('[data-section="classNamesSection"]')?.addEventListener('click', () => {
+  renderClassNames(CN_ROWS.length ? undefined : refreshClassNames());
+});
+
 // --- Printing -------------------------------------------------------------
 // The screen grid is periods-as-rows split across two tables. For paper that wastes the
 // page, so printing transposes it: days as rows, periods as columns, one entity per sheet.
@@ -2891,6 +3140,8 @@ async function refreshAfterDataLoad(keepSelection=false) {
   render();
   renderTeacherAllocations();
   renderEvidenceBlocks();
+  // Names are derived from the loaded export, so rebuild them when the data changes.
+  if (CN_ROWS.length || cnShowOnCards) refreshClassNames();
   renderSchoolGrid();
   // Selection defaults to everything in the newly loaded source.
   resetPrintSelection();
@@ -2941,6 +3192,7 @@ async function initViewer() {
   });
 
   restoreViewerLayout();
+  restoreClassNamePref();
   await loadXmlFromDefault();
   await refreshAfterDataLoad(false);
   syncGridHeight();
