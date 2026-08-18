@@ -340,6 +340,19 @@
     .pg-slot-in { background:#dfe5ec; text-align:center; font-size:8px; font-weight:850; color:#41505f; border-radius:2px; padding:3px 2px; }
     .pg-ftime { font-size:6.5px; color:#9a4708; font-weight:700; text-align:right; }
     .pg-foot { margin-top:4px; font-size:7px; color:#5e6b7a; line-height:1.3; }
+
+    /* --- Teacher allocation report (print to PDF) --- */
+    .ar-report .ar-teacher { break-inside:avoid; border:1px solid #c9d3df; border-radius:5px; padding:6px 8px; margin:0 0 6px; }
+    .ar-name { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; font-weight:850; letter-spacing:-.01em; border-bottom:1px solid #e3e9f0; padding-bottom:3px; margin-bottom:4px; }
+    .ar-hours { font-size:13px; font-weight:900; white-space:nowrap; }
+    .ar-cols { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
+    .ar-label { font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; color:#5e6b7a; margin-bottom:2px; }
+    .ar-table { width:100%; border-collapse:collapse; }
+    .ar-table td { border-bottom:1px solid #eef2f7; padding:1px 3px 1px 0; vertical-align:top; font-size:8.5px; line-height:1.25; }
+    .ar-item { font-weight:800; white-space:nowrap; }
+    .ar-h { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; width:34px; }
+    .ar-detail { color:#41505f; overflow-wrap:anywhere; }
+    .ar-rooms { margin-top:4px; font-size:8px; color:#5e6b7a; }
     @media (max-width: 900px) {
       .toolbar, .xml-source { grid-template-columns:1fr; position:relative; }
       .header-shell, .release-grid, .allocation-header { grid-template-columns:1fr; display:grid; }
@@ -693,7 +706,8 @@
         </div>
         <div>
           <label>Actions</label>
-          <button id="downloadAllocationCsv" type="button">Allocation CSV</button>
+          <button id="downloadAllocationCsv" type="button">Spreadsheet</button>
+          <button id="printAllocation" type="button" class="primary">PDF</button>
         </div>
       </div>
       <div class="allocation-toolbar-note">Subject and grade-level totals are derived from scheduled XML cards. Multi-class cards are counted once for teacher total time and proportionally split across grade/section breakdowns.</div>
@@ -2078,7 +2092,9 @@ function buildTeacherAllocationRows() {
   }).filter(row => row.events.length || row.total > 0);
 }
 function allocationSubjectHtml(items) {
-  return `<div class="alloc-stack">${items.map(item => `<span class="alloc-pill"><strong>${esc(item.name)}:</strong> ${esc(fmtHours(item.hours))}h</span>`).join('') || '<span class="alloc-muted">No subject allocation</span>'}</div>`;
+  // The homerooms sit in the tooltip: they are what the export needs, but putting them in
+  // the cell would widen an already dense table.
+  return `<div class="alloc-stack">${items.map(item => `<span class="alloc-pill" title="${esc(item.name)} — ${esc(item.classes.join(', ') || 'no class')}"><strong>${esc(item.name)}:</strong> ${esc(fmtHours(item.hours))}h</span>`).join('') || '<span class="alloc-muted">No subject allocation</span>'}</div>`;
 }
 function allocationGradeHtml(items) {
   return `<div class="alloc-stack">${items.map(item => `<span class="alloc-pill"><strong>${esc(item.name)}:</strong> ${esc(item.sections.join(', '))} · ${esc(fmtHours(item.hours))}h</span>`).join('') || '<span class="alloc-muted">No grade allocation</span>'}</div>`;
@@ -2128,27 +2144,112 @@ function renderTeacherAllocations() {
     <td>${row.rooms.length ? `<div class="alloc-stack">${compactList(row.rooms, 10).map(room => `<span class="alloc-pill">${esc(room)}</span>`).join('')}</div>` : '<span class="alloc-muted">No room data</span>'}</td>
   </tr>`).join('')}</tbody>`;
 }
-function allocationCsvEscape(v) { return csvEscape(v); }
-function downloadAllocationCsv() {
-  const rows = [['Teacher','Total hours','Subjects with hours','Grade levels, sections and hours','Rooms']];
-  for (const row of getFilteredAllocationRows()) {
-    rows.push([
-      row.teacher.name,
-      `${fmtHours(row.total)}h`,
-      row.subjectSummary.map(s => `${s.name}: ${fmtHours(s.hours)}h`).join('; '),
-      row.gradeSummary.map(g => `${g.name}: ${g.sections.join(', ')} (${fmtHours(g.hours)}h)`).join('; '),
-      row.rooms.join('; ')
-    ]);
+// Which homerooms a teacher takes, and what they teach each of them. Hours are split the
+// same way the grade breakdown splits them, so a card covering three homerooms contributes
+// a third to each rather than counting three times.
+function allocationHomeroomBreakdown(row) {
+  const map = new Map();
+  for (const ev of row.events) {
+    const weight = eventWeight(ev);
+    const classList = ev.classes.length ? ev.classes : ['Unassigned'];
+    const share = weight / classList.length;
+    for (const className of classList) {
+      if (!map.has(className)) map.set(className, { name: className, hours: 0, subjects: new Set() });
+      const item = map.get(className);
+      item.hours += share;
+      item.subjects.add(ev.subject || 'Unassigned subject');
+    }
   }
-  const csv = rows.map(r => r.map(allocationCsvEscape).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  return Array.from(map.values())
+    .sort((a, b) => naturalKey(a.name).localeCompare(naturalKey(b.name)))
+    .map(item => ({ name: item.name, hours: item.hours, subjects: Array.from(item.subjects).sort() }));
+}
+function allocationFilterNote() {
+  const q = String(allocationSearch?.value || '').trim();
+  const band = allocationLoadFilter?.value || 'all';
+  const bandText = band === 'all' ? '' : (allocationLoadFilter.selectedOptions[0] || {}).text || band;
+  const bits = [];
+  if (q) bits.push(`search "${q}"`);
+  if (bandText) bits.push(bandText);
+  return bits.length ? bits.join(' · ') : 'no filter';
+}
+function allocationFileStem() {
+  const q = String(allocationSearch?.value || '').trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '');
+  const band = allocationLoadFilter?.value || 'all';
+  return ['teacher_allocations', activeSourceKey, band !== 'all' ? band : '', q].filter(Boolean).join('_');
+}
+// One row per teacher/subject and per teacher/homeroom, tagged with a Section column, so
+// the sheet stays rectangular and pivots cleanly while still reading as three blocks.
+function downloadAllocationCsv() {
+  const rows = [['Teacher', 'Section', 'Item', 'Hours', 'Detail']];
+  for (const row of getFilteredAllocationRows()) {
+    rows.push([row.teacher.name, 'Summary', 'Total weekly hours', fmtHours(row.total), row.rooms.join('; ')]);
+    for (const s of row.subjectSummary) {
+      rows.push([row.teacher.name, 'Subject', s.name, fmtHours(s.hours), s.classes.join('; ')]);
+    }
+    for (const h of allocationHomeroomBreakdown(row)) {
+      rows.push([row.teacher.name, 'Homeroom', h.name, fmtHours(h.hours), h.subjects.join('; ')]);
+    }
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'teacher_allocation_secondary_timetable_2026_2027_v3.csv';
+  a.download = `${allocationFileStem()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
+// PDF goes through the browser's own print-to-PDF, reusing the entity print shell rather
+// than pulling in a PDF library. Teacher blocks avoid breaking across pages.
+function allocationReportHtml() {
+  const rows = getFilteredAllocationRows();
+  if (!rows.length) return '<section class="pg-page"><div class="pg-title">Teacher allocations</div><p>No teachers match the current filter.</p></section>';
+  const totals = rows.map(r => r.total);
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+  return `<section class="pg-page ar-report">
+    <div class="pg-head">
+      <div class="pg-title">Teacher allocations</div>
+      <div class="pg-sub">${esc(DATA.meta.title || sourceConfig().title)}<br>${esc(sourceConfig().label)} · ${esc(rows.length)} teacher${rows.length === 1 ? '' : 's'} · avg ${esc(fmtHours(avg))}h · ${esc(allocationFilterNote())}</div>
+    </div>
+    ${rows.map(row => {
+      const homerooms = allocationHomeroomBreakdown(row);
+      return `<div class="ar-teacher">
+        <div class="ar-name">${esc(row.teacher.name)}<span class="ar-hours">${esc(fmtHours(row.total))}h</span></div>
+        <div class="ar-cols">
+          <div class="ar-col">
+            <div class="ar-label">Subjects taught</div>
+            <table class="ar-table"><tbody>${row.subjectSummary.map(s => `<tr>
+              <td class="ar-item">${esc(s.name)}</td><td class="ar-h">${esc(fmtHours(s.hours))}h</td>
+              <td class="ar-detail">${esc(s.classes.join(', '))}</td></tr>`).join('')
+              || '<tr><td class="ar-detail">None</td></tr>'}</tbody></table>
+          </div>
+          <div class="ar-col">
+            <div class="ar-label">Homerooms handled</div>
+            <table class="ar-table"><tbody>${homerooms.map(h => `<tr>
+              <td class="ar-item">${esc(h.name)}</td><td class="ar-h">${esc(fmtHours(h.hours))}h</td>
+              <td class="ar-detail">${esc(h.subjects.join(', '))}</td></tr>`).join('')
+              || '<tr><td class="ar-detail">None</td></tr>'}</tbody></table>
+          </div>
+        </div>
+        ${row.rooms.length ? `<div class="ar-rooms">Rooms: ${esc(compactList(row.rooms, 12).join(', '))}</div>` : ''}
+      </div>`;
+    }).join('')}
+  </section>`;
+}
+function printAllocationReport() {
+  if (!printRoot) return;
+  printRoot.innerHTML = allocationReportHtml();
+  document.body.classList.add('printing-entities');
+  const cleanup = () => {
+    document.body.classList.remove('printing-entities');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 2000);
+}
+document.getElementById('printAllocation')?.addEventListener('click', printAllocationReport);
 allocationSearch?.addEventListener('input', renderTeacherAllocations);
 allocationLoadFilter?.addEventListener('change', renderTeacherAllocations);
 allocationSort?.addEventListener('change', renderTeacherAllocations);
