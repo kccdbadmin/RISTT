@@ -2059,6 +2059,18 @@ function sectionLabelForEvent(ev, className) {
 function summarizeMap(map, maxItems=8) {
   return Array.from(map.values()).sort((a,b) => b.hours - a.hours || a.name.localeCompare(b.name, undefined, {numeric:true})).slice(0, maxItems);
 }
+// In DP and CP the aSc subject is only a timetable container — "DP1 Block C", "Group 1",
+// "BTEC" — and the actual subject is the group: "B3 Maths AA HL.1", "BTech Business".
+// So for those classes the group name IS the subject and is what the allocation reports.
+const isDpCpEvent = ev => ev.classes.some(c => /^DP\s*\d/i.test(c) || /careers|^CP\b/i.test(c));
+function allocationSubjectLabel(ev) {
+  const fallback = ev.subject || 'Unassigned subject';
+  if (!isDpCpEvent(ev)) return fallback;
+  // Nine DP/CP lessons carry no real group (ToK, Core, MOE Arabic and the like); their
+  // subject is already the proper name, so keep it.
+  const groups = uniq(ev.groups).filter(g => g && g !== 'Entire class');
+  return groups.length ? groups.join(' / ') : fallback;
+}
 function buildTeacherAllocationRows() {
   return (DATA.selectors.teacher || []).map(teacher => {
     const evs = DATA.events.filter(ev => ev.teacherIds.includes(teacher.id));
@@ -2069,7 +2081,7 @@ function buildTeacherAllocationRows() {
     for (const ev of evs) {
       const weight = eventWeight(ev);
       total += weight;
-      const subjectName = ev.subject || 'Unassigned subject';
+      const subjectName = allocationSubjectLabel(ev);
       if (!subjects.has(subjectName)) subjects.set(subjectName, { name: subjectName, hours: 0, classes: new Set() });
       const subjectItem = subjects.get(subjectName);
       subjectItem.hours += weight;
@@ -2157,7 +2169,7 @@ function allocationHomeroomBreakdown(row) {
       if (!map.has(className)) map.set(className, { name: className, hours: 0, subjects: new Set() });
       const item = map.get(className);
       item.hours += share;
-      item.subjects.add(ev.subject || 'Unassigned subject');
+      item.subjects.add(allocationSubjectLabel(ev));
     }
   }
   return Array.from(map.values())
