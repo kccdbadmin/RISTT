@@ -226,7 +226,7 @@
     @media (max-width:720px) { .schedule-pair { grid-template-columns:1fr; } }
     .schedule-subhead { margin:6px 0 0; font-size:13px; font-weight:800; color:var(--ink); }
     .schedule-subhead.is-friday { color:#b4530a; }
-    .allocation-header { display:grid; grid-template-columns:1fr minmax(220px,.55fr) minmax(180px,.35fr) auto; gap:12px; align-items:end; margin:14px 0; }
+    .allocation-header { display:grid; grid-template-columns:1fr minmax(200px,.5fr) minmax(170px,.32fr) auto auto; gap:12px; align-items:end; margin:14px 0; }
     .allocation-toolbar-note { color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px; }
     .allocation-wrap { max-height:calc(100vh - 230px); }
     .allocation-table { min-width:1180px; table-layout:auto; }
@@ -346,6 +346,13 @@
     .ar-name { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; font-weight:850; letter-spacing:-.01em; border-bottom:1px solid #e3e9f0; padding-bottom:3px; margin-bottom:4px; }
     .ar-hours { font-size:13px; font-weight:900; white-space:nowrap; }
     .ar-cols { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
+    /* With homerooms switched off the subjects table takes the full width instead of
+       leaving half the sheet blank. */
+    .ar-cols.is-single { grid-template-columns:1fr; }
+    /* Subjects alone leave a narrow block on a landscape sheet, so pair teachers up and
+       use the full width rather than printing a column of whitespace. */
+    .ar-body.is-two-up { display:grid; grid-template-columns:1fr 1fr; gap:6px; align-items:start; }
+    .ar-rooms-list { white-space:normal; overflow-wrap:anywhere; }
     .ar-label { font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; color:#5e6b7a; margin-bottom:2px; }
     .ar-table { width:100%; border-collapse:collapse; }
     .ar-table td { border-bottom:1px solid #eef2f7; padding:1px 3px 1px 0; vertical-align:top; font-size:8.5px; line-height:1.25; }
@@ -705,9 +712,15 @@
           </select>
         </div>
         <div>
+          <label>PDF options</label>
+          <label class="check-control" for="allocPdfHomerooms"><input type="checkbox" id="allocPdfHomerooms" checked> Homerooms</label>
+        </div>
+        <div>
           <label>Actions</label>
-          <button id="downloadAllocationCsv" type="button">Spreadsheet</button>
-          <button id="printAllocation" type="button" class="primary">PDF</button>
+          <div class="button-row">
+            <button id="downloadAllocationCsv" type="button">Spreadsheet</button>
+            <button id="printAllocation" type="button" class="primary">PDF</button>
+          </div>
         </div>
       </div>
       <div class="allocation-toolbar-note">Subject and grade-level totals are derived from scheduled XML cards. Multi-class cards are counted once for teacher total time and proportionally split across grade/section breakdowns.</div>
@@ -2214,7 +2227,22 @@ function downloadAllocationCsv() {
 }
 // PDF goes through the browser's own print-to-PDF, reusing the entity print shell rather
 // than pulling in a PDF library. Teacher blocks avoid breaking across pages.
+// A teacher taking the same subject to eight homerooms produced eight near-identical rows,
+// which is what pushed the report to 84 pages. Collapse homerooms that share a subject set
+// into a single row: "6D, 6E, 6F, 6G — ISLAMIC A — 1.6h". No information is lost.
+function allocationHomeroomGroups(row) {
+  const map = new Map();
+  for (const h of allocationHomeroomBreakdown(row)) {
+    const key = h.subjects.join(', ');
+    if (!map.has(key)) map.set(key, { subjects: key, classes: [], hours: 0 });
+    const group = map.get(key);
+    group.classes.push(h.name);
+    group.hours += h.hours;
+  }
+  return Array.from(map.values()).sort((a, b) => b.hours - a.hours || a.subjects.localeCompare(b.subjects));
+}
 function allocationReportHtml() {
+  const withHomerooms = document.getElementById('allocPdfHomerooms')?.checked !== false;
   const rows = getFilteredAllocationRows();
   if (!rows.length) return '<section class="pg-page"><div class="pg-title">Teacher allocations</div><p>No teachers match the current filter.</p></section>';
   const totals = rows.map(r => r.total);
@@ -2224,11 +2252,12 @@ function allocationReportHtml() {
       <div class="pg-title">Teacher allocations</div>
       <div class="pg-sub">${esc(DATA.meta.title || sourceConfig().title)}<br>${esc(sourceConfig().label)} · ${esc(rows.length)} teacher${rows.length === 1 ? '' : 's'} · avg ${esc(fmtHours(avg))}h · ${esc(allocationFilterNote())}</div>
     </div>
+    <div class="ar-body${withHomerooms ? '' : ' is-two-up'}">
     ${rows.map(row => {
-      const homerooms = allocationHomeroomBreakdown(row);
+      const homerooms = withHomerooms ? allocationHomeroomGroups(row) : [];
       return `<div class="ar-teacher">
         <div class="ar-name">${esc(row.teacher.name)}<span class="ar-hours">${esc(fmtHours(row.total))}h</span></div>
-        <div class="ar-cols">
+        <div class="ar-cols${withHomerooms ? '' : ' is-single'}">
           <div class="ar-col">
             <div class="ar-label">Subjects taught</div>
             <table class="ar-table"><tbody>${row.subjectSummary.map(s => `<tr>
@@ -2236,17 +2265,18 @@ function allocationReportHtml() {
               <td class="ar-detail">${esc(s.classes.join(', '))}</td></tr>`).join('')
               || '<tr><td class="ar-detail">None</td></tr>'}</tbody></table>
           </div>
-          <div class="ar-col">
+          ${withHomerooms ? `<div class="ar-col">
             <div class="ar-label">Homerooms handled</div>
             <table class="ar-table"><tbody>${homerooms.map(h => `<tr>
-              <td class="ar-item">${esc(h.name)}</td><td class="ar-h">${esc(fmtHours(h.hours))}h</td>
-              <td class="ar-detail">${esc(h.subjects.join(', '))}</td></tr>`).join('')
+              <td class="ar-item ar-rooms-list">${esc(h.classes.join(', '))}</td><td class="ar-h">${esc(fmtHours(h.hours))}h</td>
+              <td class="ar-detail">${esc(h.subjects)}</td></tr>`).join('')
               || '<tr><td class="ar-detail">None</td></tr>'}</tbody></table>
-          </div>
+          </div>` : ''}
         </div>
         ${row.rooms.length ? `<div class="ar-rooms">Rooms: ${esc(compactList(row.rooms, 12).join(', '))}</div>` : ''}
       </div>`;
     }).join('')}
+    </div>
   </section>`;
 }
 function printAllocationReport() {
