@@ -355,11 +355,24 @@
     .ar-rooms-list { white-space:normal; overflow-wrap:anywhere; }
     .ar-label { font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; color:#5e6b7a; margin-bottom:2px; }
     .ar-table { width:100%; border-collapse:collapse; }
-    .ar-table td { border-bottom:1px solid #eef2f7; padding:1px 3px 1px 0; vertical-align:top; font-size:8.5px; line-height:1.25; }
+    /* The bare `td { height:70px }` rule for the on-screen grid applies to every table in
+       the document, which made each report row 70px tall. Report tables size to content. */
+    .ar-table td { height:auto; border-bottom:1px solid #eef2f7; padding:1px 3px 1px 0; vertical-align:top; font-size:8.5px; line-height:1.25; }
     .ar-item { font-weight:800; white-space:nowrap; }
     .ar-h { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; width:34px; }
     .ar-detail { color:#41505f; overflow-wrap:anywhere; }
     .ar-rooms { margin-top:4px; font-size:8px; color:#5e6b7a; }
+
+    /* --- Teacher print: cover sheet and per-teacher load breakdown --- */
+    .cover-grid { columns:3; column-gap:14px; }
+    .cover-dept { break-inside:avoid; margin:0 0 9px; }
+    .cover-dept-head { display:flex; justify-content:space-between; gap:8px; font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; color:#14213d; border-bottom:1.5px solid #9aa6b6; padding-bottom:2px; margin-bottom:2px; }
+    .cover-table { width:100%; border-collapse:collapse; }
+    .cover-table td { height:auto; border-bottom:1px solid #eef2f7; padding:1px 2px 1px 0; font-size:9px; line-height:1.3; }
+    .cover-h { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; width:30px; }
+    .tl-load { margin-top:5px; border-top:1.5px solid #9aa6b6; padding-top:4px; break-inside:avoid; }
+    .tl-load-head { font-size:10px; font-weight:900; letter-spacing:-.01em; margin-bottom:3px; }
+    .tl-load-cols { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; align-items:start; }
     @media (max-width: 900px) {
       .toolbar, .xml-source { grid-template-columns:1fr; position:relative; }
       .header-shell, .release-grid, .allocation-header { grid-template-columns:1fr; display:grid; }
@@ -2958,6 +2971,135 @@ document.querySelector('[data-section="classNamesSection"]')?.addEventListener('
   renderClassNames(CN_ROWS.length ? undefined : refreshClassNames());
 });
 
+// --- Departments ----------------------------------------------------------
+// aSc carries no department field. For Secondary it is recovered from the Dept Meeting
+// lessons, which partition the staff cleanly — 68 of 75 teachers sit in exactly one and
+// none in two — and each group is named from what its members mostly teach. Primary has no
+// such meetings, so a teacher's department is simply their own main subject.
+const DEPT_BY_SUBJECT = [
+  [/theory of knowledge|\bToK\b/i, 'Theory of Knowledge'],
+  [/^ENGLISH\b|Eng L[LP]|Eng Lit|Lang Lit|Lit&Perf/i, 'English'],
+  [/^DESIGN\b|Design Tech|Computer Sci|CompSci/i, 'Design & Technology'],
+  [/Visual Art|THE ARTS|Theatre|Media Art|Music/i, 'The Arts'],
+  [/^SCIENCE\b|Biology|\bBio\b|Chemistry|Physics|Environmental Science|\bESS\b|Sports Science/i, 'Science'],
+  [/^PHE\b/i, 'PHE'],
+  [/^MATH|Maths/i, 'Mathematics'],
+  [/FRENCH|SPANISH|French|Spanish/i, 'Modern European Languages'],
+  [/ARABIC|ISLAMIC|UAESS|MOE Arabic|iStudy|\bMSC\b/i, 'MOE Subjects'],
+  [/^INS\b|Psych|Business|Econ|Global Pol|\bSST\b|Individuals/i, 'Individuals & Societies']
+];
+// Primary variant families collapse: Homeroom Arabic B and Homeroom N/A are both Homeroom.
+const PRIMARY_DEPT_FAMILIES = [
+  [/^Homeroom/i, 'Homeroom'],
+  [/^Arabic/i, 'Arabic'],
+  [/^Islamic/i, 'Islamic'],
+  [/^(PHE|EY ?PE|EY2 ?PE)/i, 'PHE']
+];
+const UNASSIGNED_DEPT = 'Unassigned';
+const isNonTeachingName = name => /^(break|lunch|recess|pack\s*up)\b/i.test(String(name || ''));
+function subjectToDepartment(subject) {
+  for (const [pattern, name] of DEPT_BY_SUBJECT) if (pattern.test(String(subject || ''))) return name;
+  return '';
+}
+function primaryDepartment(subject) {
+  if (!subject) return '';
+  for (const [pattern, name] of PRIMARY_DEPT_FAMILIES) if (pattern.test(subject)) return name;
+  return subject;
+}
+function dominantSubjectName(row) {
+  const real = row.subjectSummary.filter(s => !isNonTeachingName(s.name) && !/meeting/i.test(s.name));
+  return real.length ? real[0].name : '';
+}
+function buildDepartmentIndex() {
+  const map = new Map();
+  const alloc = buildTeacherAllocationRows();
+  const byName = new Map(alloc.map(r => [r.teacher.name, r]));
+  if (activeSourceKey === 'secondary') {
+    const byLesson = new Map();
+    for (const ev of DATA.events) if (!byLesson.has(ev.lessonId)) byLesson.set(ev.lessonId, ev);
+    for (const meeting of [...byLesson.values()].filter(l => /dept\.?\s*meeting/i.test(l.subject))) {
+      // Name the group from the weight of what its members teach. ToK is excluded here: it
+      // is its own department for unassigned staff, not a label for a whole meeting group.
+      const tally = new Map();
+      for (const teacher of meeting.teachers) {
+        const row = byName.get(teacher);
+        if (!row) continue;
+        for (const s of row.subjectSummary) {
+          if (/meeting/i.test(s.name) || isNonTeachingName(s.name)) continue;
+          const dept = subjectToDepartment(s.name);
+          if (dept && dept !== 'Theory of Knowledge') tally.set(dept, (tally.get(dept) || 0) + s.hours);
+        }
+      }
+      const best = Array.from(tally.entries()).sort((a, b) => b[1] - a[1])[0];
+      for (const teacher of meeting.teachers) map.set(teacher, best ? best[0] : UNASSIGNED_DEPT);
+    }
+  }
+  // Anyone left — Primary always, plus the Secondary staff missing from a Dept Meeting —
+  // is placed by their own main subject, DP group names included.
+  for (const row of alloc) {
+    if (map.has(row.teacher.name)) continue;
+    const dominant = dominantSubjectName(row);
+    const dept = activeSourceKey === 'primary' ? primaryDepartment(dominant) : subjectToDepartment(dominant);
+    map.set(row.teacher.name, dept || UNASSIGNED_DEPT);
+  }
+  return map;
+}
+// Cover sheet for a teacher print run: grouped by department A–Z, teachers within in the
+// order the rest of the viewer shows them, and totals only — no per-subject detail.
+function teacherCoverHtml(ids) {
+  const departments = buildDepartmentIndex();
+  const alloc = new Map(buildTeacherAllocationRows().map(r => [r.teacher.id, r]));
+  const items = ids.map(id => {
+    const teacher = (DATA.selectors.teacher || []).find(t => t.id === id);
+    const name = teacher ? teacher.name : id;
+    const row = alloc.get(id);
+    return { name, dept: departments.get(name) || UNASSIGNED_DEPT, total: row ? row.total : 0 };
+  });
+  const grouped = new Map();
+  for (const item of items) {
+    if (!grouped.has(item.dept)) grouped.set(item.dept, []);
+    grouped.get(item.dept).push(item);
+  }
+  const ordered = Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const grand = items.reduce((total, i) => total + i.total, 0);
+  return `<section class="pg-page cover-page">
+    <div class="pg-head">
+      <div class="pg-title">Teacher timetables</div>
+      <div class="pg-sub">${esc(DATA.meta.title || sourceConfig().title)}<br>${esc(sourceConfig().label)} · ${esc(items.length)} teacher${items.length === 1 ? '' : 's'} · ${esc(fmtHours(grand))}h total</div>
+    </div>
+    <div class="cover-grid">
+      ${ordered.map(([dept, list]) => {
+        const sorted = list.slice().sort((a, b) => a.name.localeCompare(b.name));
+        const sub = sorted.reduce((t, i) => t + i.total, 0);
+        return `<div class="cover-dept">
+          <div class="cover-dept-head"><span>${esc(dept)}</span><span>${esc(sorted.length)} · ${esc(fmtHours(sub))}h</span></div>
+          <table class="cover-table"><tbody>${sorted.map(i =>
+            `<tr><td>${esc(i.name)}</td><td class="cover-h">${esc(fmtHours(i.total))}h</td></tr>`).join('')}</tbody></table>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="pg-foot">Loads are weekly totals with Week A/B lessons counted at 0.5. Departments are taken from the Dept Meeting groups where present, otherwise from the teacher's main subject.</div>
+  </section>`;
+}
+// Load breakdown printed under a teacher's own grid.
+function teacherLoadHtml(id) {
+  const row = buildTeacherAllocationRows().find(r => r.teacher.id === id);
+  if (!row) return '';
+  const departments = buildDepartmentIndex();
+  const homerooms = allocationHomeroomGroups(row);
+  return `<div class="tl-load">
+    <div class="tl-load-head">${esc(departments.get(row.teacher.name) || UNASSIGNED_DEPT)} &middot; ${esc(fmtHours(row.total))}h total</div>
+    <div class="tl-load-cols">
+      <div><div class="ar-label">Subjects</div><table class="ar-table"><tbody>${row.subjectSummary.map(s =>
+        `<tr><td class="ar-item">${esc(s.name)}</td><td class="ar-h">${esc(fmtHours(s.hours))}h</td></tr>`).join('') || '<tr><td>None</td></tr>'}</tbody></table></div>
+      <div><div class="ar-label">Homerooms</div><table class="ar-table"><tbody>${homerooms.map(h =>
+        `<tr><td class="ar-item ar-rooms-list">${esc(h.classes.join(', '))}</td><td class="ar-h">${esc(fmtHours(h.hours))}h</td></tr>`).join('') || '<tr><td>None</td></tr>'}</tbody></table></div>
+      <div><div class="ar-label">Grade spread</div><table class="ar-table"><tbody>${row.gradeSummary.map(g =>
+        `<tr><td class="ar-item">${esc(g.name)}</td><td class="ar-h">${esc(fmtHours(g.hours))}h</td></tr>`).join('') || '<tr><td>None</td></tr>'}</tbody></table></div>
+    </div>
+  </div>`;
+}
+
 // --- Printing -------------------------------------------------------------
 // The screen grid is periods-as-rows split across two tables. For paper that wastes the
 // page, so printing transposes it: days as rows, periods as columns, one entity per sheet.
@@ -3131,11 +3273,14 @@ function printPageHtml(view, id) {
     </div>
     <table class="pg-table"><thead>${head}</thead><tbody>${body}</tbody></table>
     ${showFridayNote ? '<div class="pg-foot">Column times are Monday&ndash;Thursday. Friday runs its own shortened times, printed in each Friday cell; shaded Friday cells are periods that do not run.</div>' : ''}
+    ${view === 'teacher' ? teacherLoadHtml(id) : ''}
   </section>`;
 }
 function printEntities(view, ids) {
   if (!printRoot || !ids.length) return false;
-  printRoot.innerHTML = ids.map(id => printPageHtml(view, id)).join('');
+  // A teacher run opens with one cover sheet for the whole packet.
+  const cover = view === 'teacher' ? teacherCoverHtml(ids) : '';
+  printRoot.innerHTML = cover + ids.map(id => printPageHtml(view, id)).join('');
   document.body.classList.add('printing-entities');
   const cleanup = () => {
     document.body.classList.remove('printing-entities');
