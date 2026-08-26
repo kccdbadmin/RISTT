@@ -744,6 +744,11 @@
           <div class="sl-status" id="slOpenApplyStatus">Not loaded</div>
         </div>
         <div>
+          <label for="slElectives">Grade 10 electives</label>
+          <input type="file" id="slElectives" accept=".xlsx">
+          <div class="sl-status" id="slElectivesStatus">Not loaded</div>
+        </div>
+        <div>
           <label>Build</label>
           <div class="button-row">
             <button id="slBuild" class="primary" type="button">Build set lists</button>
@@ -3179,7 +3184,7 @@ function teacherLoadHtml(id) {
 // Joins the student spreadsheets to the generated class names and works out who belongs in
 // which set. Rules confirmed with the school; anything not derivable is reported, never
 // guessed. Files stay in the browser.
-const SL = { export: null, langs: null, typeform: null, openApply: null, result: null, view: 'sets',
+const SL = { export: null, langs: null, typeform: null, openApply: null, electives: null, result: null, view: 'sets',
              manual: new Map(),     // School Id -> set code chosen by hand in the Gaps view
              selected: new Set() }; // set codes ticked for spreadsheet export
 const SL_COLS = {
@@ -3190,8 +3195,49 @@ const SL_COLS = {
   langs: { esis: [/^esis\s*number$/i], subject: [/^subject$/i], classes: [/^classes$/i], year: [/^year\s*\(nc\)$/i] },
   typeform: { schoolId: [/^school\s*id$/i], choice: [/^language$/i], name: [/^full\s*name$/i],
               date: [/^date$/i], time: [/^time$/i] },
-  openApply: { schoolId: [/^student\s*isams\s*id$/i], choice: [/language\s*first\s*choice$/i] }
+  openApply: { schoolId: [/^student\s*isams\s*id$/i], choice: [/language\s*first\s*choice$/i] },
+  // The electives workbook carries no School Id, so this one has to join on name.
+  electives: { block: [/^block$/i], subject: [/^subject$/i], build: [/^class\s*\(build\)$/i],
+               form: [/^form\s*20\d\d[-/]\d\d$/i], student: [/^student$/i] }
 };
+// Names differ in shape between the two files: the electives sheet uses short names
+// ("Astrid Sanchez") where the export holds the full legal name ("Astrid Cristina
+// Carrasquel Sanchez"), surnames are spaced differently ("Saif Alyafei" vs "Saif Al
+// Yafei"), and either side may hold only part of a compound surname ("Marco Kjaerulf" vs
+// "Marco Kjaerulf-Moeller"). Match on first forename plus a collapsed surname, and never
+// guess when two candidates fit. Callers pass a year-scoped candidate list, which is what
+// makes the looser comparisons safe: two "Diego Rodriguez" exist school-wide but only one
+// per year group.
+const nameKey = s => String(s || '').replace(/[^A-Za-z]/g, '').toLowerCase();
+// One surname is a fragment of the other. Suffix matching is unrestricted because a shared
+// tail is already distinctive; prefix matching needs a length floor or a stray "Al" would
+// match every Arabic surname in the year.
+const NAME_PREFIX_MIN = 4;
+function surnamesAgree(a, b) {
+  if (!a || !b) return false;
+  return a === b || a.endsWith(b) || b.endsWith(a)
+    || (b.length >= NAME_PREFIX_MIN && a.startsWith(b))
+    || (a.length >= NAME_PREFIX_MIN && b.startsWith(a));
+}
+function matchStudentByName(name, candidates) {
+  const whole = nameKey(name);
+  const exact = candidates.filter(c => nameKey(c.fullName) === whole);
+  if (exact.length === 1) return { student: exact[0], how: 'exact' };
+  const tokens = String(name || '').trim().split(/\s+/);
+  const first = nameKey(tokens[0]);
+  const rest = nameKey(tokens.slice(1).join(''));
+  if (!first || !rest) return { student: null, how: 'none' };
+  const fuzzy = candidates.filter(c => {
+    const cf = nameKey(String(c.forename || '').split(/\s+/)[0]);
+    if (cf !== first) return false;
+    // Compare against the surname column and, as a fallback, everything after the first
+    // forename of the full name, since middle names sit in either field depending on export.
+    const tail = nameKey(String(c.fullName || '').trim().split(/\s+/).slice(1).join(''));
+    return surnamesAgree(nameKey(c.surname), rest) || surnamesAgree(tail, rest);
+  });
+  if (fuzzy.length === 1) return { student: fuzzy[0], how: 'name' };
+  return { student: null, how: fuzzy.length > 1 ? 'ambiguous' : 'none' };
+}
 // What kind of rule fills a given generated class.
 function setCategory(r) {
   if (r.elective) return 'option';
@@ -3369,8 +3415,59 @@ function buildSetLists() {
       .map(([y, n]) => `Y${y}: ${n}`).join(', ');
     notes.push(`Scope is Grades 6-10: kept ${students.length} students, excluded ${droppedTotal} outside scope (${detail}). Rows not marked Current were skipped: ${allRows.length - current.length}.`);
   }
-  const optionSets = classes.filter(c => c.cat === 'option').map(c => c.r.name);
-  if (optionSets.length) notes.push(`${optionSets.length} Grade 10 option sets cannot be filled without the blocks spreadsheet: ${optionSets.slice(0, 6).join(', ')}${optionSets.length > 6 ? '…' : ''}.`);
+  // Grade 10 option blocks, filled from the electives workbook.
+  const optionSets = classes.filter(c => c.cat === 'option');
+  if (SL.electives) {
+    const sheet = pickSheet(SL.electives, /elective\s*class\s*list/i, SL_COLS.electives);
+    const rows = sheetToObjects(sheet, SL_COLS.electives).filter(r => r.student);
+    const year10 = students.filter(s => String(s.year).trim() === '10');
+    // "B1 Biology" in the sheet against "B1 Bio" from aSc: same block, one a prefix of the
+    // other once normalised.
+    const norm = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    const resolveSet = build => {
+      const target = norm(build);
+      const hit = optionSets.filter(c => {
+        const n = norm(c.r.name);
+        return n === target || target.startsWith(n) || n.startsWith(target);
+      });
+      return hit.length === 1 ? hit[0].r.name : null;
+    };
+    const unresolvedBuilds = new Set();
+    const misses = new Map();
+    let placed = 0;
+    const cache = new Map();
+    for (const row of rows) {
+      const code = resolveSet(row.build);
+      if (!code) { unresolvedBuilds.add(row.build); continue; }
+      const key = nameKey(row.student);
+      if (!cache.has(key)) cache.set(key, matchStudentByName(row.student, year10));
+      const { student, how } = cache.get(key);
+      if (!student) { misses.set(row.student, how); continue; }
+      assignments.get(keyOf(student)).add(code);
+      placed++;
+    }
+    notes.push(`Electives: ${placed} placements across ${optionSets.length} option sets, from ${rows.length} rows.`
+      + ` Matched on name because the workbook carries no School Id.`);
+    if (unresolvedBuilds.size) {
+      notes.push(`Elective classes with no matching set in the timetable: ${Array.from(unresolvedBuilds).join(', ')}.`);
+    }
+    // Two different problems wear the same symptom, and the fix differs: an absent student
+    // needs adding to iSAMS, an ambiguous one needs the sheet's name spelled out in full.
+    const absent = Array.from(misses.entries()).filter(([, how]) => how !== 'ambiguous').map(([n]) => n);
+    const ambiguous = Array.from(misses.entries()).filter(([, how]) => how === 'ambiguous').map(([n]) => n);
+    if (absent.length) {
+      notes.push(`${absent.length} elective student${absent.length === 1 ? ' has' : 's have'} no Year 10 record in the iSAMS export, so `
+        + `their option blocks could not be placed — most likely new enrolments not yet in iSAMS. `
+        + `Add them to the export and reload: ${absent.join(', ')}.`);
+    }
+    if (ambiguous.length) {
+      notes.push(`${ambiguous.length} elective name${ambiguous.length === 1 ? ' matches' : 's match'} more than one Year 10 student and `
+        + `${ambiguous.length === 1 ? 'was' : 'were'} left unplaced rather than guessed: ${ambiguous.join(', ')}. `
+        + `Use the student's full legal name in the electives sheet to resolve this.`);
+    }
+  } else if (optionSets.length) {
+    notes.push(`${optionSets.length} Grade 10 option sets are empty: load the electives workbook to fill them.`);
+  }
   notes.push('Language decisions by source — '
     + ['continuity', 'typeform', 'openApply'].map(k => `${k}: ${sourceTally.get(k) || 0}`).join(', ')
     + `. Priority is continuity, then Typeform, then Open Apply.`
@@ -3530,6 +3627,19 @@ document.getElementById('slLangs')?.addEventListener('change', async e => {
 });
 document.getElementById('slTypeform')?.addEventListener('change', async e => {
   if (e.target.files[0]) { await slLoad('typeform', e.target.files[0], 'slTypeformStatus', SL_COLS.typeform); }
+});
+document.getElementById('slElectives')?.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const parsed = await readXlsx(file);
+    sheetToObjects(pickSheet(parsed, /elective\s*class\s*list/i, SL_COLS.electives), SL_COLS.electives);
+    SL.electives = parsed;
+    slStatus('slElectivesStatus', `${file.name} · ${parsed.sheets.length} sheets`, 'ok');
+  } catch (err) {
+    SL.electives = null;
+    slStatus('slElectivesStatus', err.message || String(err), 'bad');
+  }
 });
 document.getElementById('slOpenApply')?.addEventListener('change', async e => {
   if (e.target.files[0]) { await slLoad('openApply', e.target.files[0], 'slOpenApplyStatus', SL_COLS.openApply); }
@@ -3789,26 +3899,43 @@ async function readXlsx(file) {
   const sheetNames = wbXml
     ? Array.from(parser.parseFromString(wbXml, 'application/xml').querySelectorAll('sheets > sheet')).map(s => s.getAttribute('name'))
     : [];
-  const sheetPath = zip.names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
-    .sort((a, b) => Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1]))[0];
-  const sheetXml = await zip.read(sheetPath);
-  if (!sheetXml) throw new Error('No worksheet found in the file.');
-  const rows = [];
-  for (const row of parser.parseFromString(sheetXml, 'application/xml').querySelectorAll('sheetData > row')) {
-    const cells = [];
-    for (const c of row.querySelectorAll('c')) {
-      const idx = colToIndex(c.getAttribute('r') || '');
-      let value;
-      if (c.getAttribute('t') === 'inlineStr') value = c.querySelector('is')?.textContent ?? '';
-      else {
-        const raw = c.querySelector('v')?.textContent ?? '';
-        value = c.getAttribute('t') === 's' ? (shared[Number(raw)] ?? '') : raw;
+  // Read every worksheet, not just the first: the electives workbook keeps the data that
+  // matters on its second sheet.
+  const sheetPaths = zip.names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a, b) => Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1]));
+  if (!sheetPaths.length) throw new Error('No worksheet found in the file.');
+  const sheets = [];
+  for (let i = 0; i < sheetPaths.length; i++) {
+    const sheetXml = await zip.read(sheetPaths[i]);
+    if (!sheetXml) continue;
+    const rows = [];
+    for (const row of parser.parseFromString(sheetXml, 'application/xml').querySelectorAll('sheetData > row')) {
+      const cells = [];
+      for (const c of row.querySelectorAll('c')) {
+        const idx = colToIndex(c.getAttribute('r') || '');
+        let value;
+        if (c.getAttribute('t') === 'inlineStr') value = c.querySelector('is')?.textContent ?? '';
+        else {
+          const raw = c.querySelector('v')?.textContent ?? '';
+          value = c.getAttribute('t') === 's' ? (shared[Number(raw)] ?? '') : raw;
+        }
+        cells[idx] = String(value).trim();
       }
-      cells[idx] = String(value).trim();
+      rows.push(cells);
     }
-    rows.push(cells);
+    sheets.push({ name: sheetNames[i] || `Sheet${i + 1}`, rows });
   }
-  return { sheetName: sheetNames[0] || 'Sheet1', rows };
+  return { sheetName: sheets[0].name, rows: sheets[0].rows, sheets };
+}
+// Pick a worksheet by name, falling back to whichever one carries the wanted headers.
+function pickSheet(parsed, namePattern, required) {
+  const all = parsed.sheets || [{ name: parsed.sheetName, rows: parsed.rows }];
+  const byName = all.find(s => namePattern.test(s.name));
+  if (byName) return byName;
+  for (const sheet of all) {
+    try { sheetToObjects(sheet, required); return sheet; } catch (err) { /* not this one */ }
+  }
+  throw new Error(`No sheet matching ${namePattern} with the expected columns. Sheets: ${all.map(s => s.name).join(', ')}`);
 }
 // Header-driven lookup so a renamed or reordered column does not silently break the join.
 function sheetToObjects(parsed, required) {
