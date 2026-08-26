@@ -711,10 +711,12 @@
   <section id="setListsSection" class="page-section" aria-label="Class set lists">
     <div class="allocation-panel">
       <h2>Set lists</h2>
-      <p>Builds iSAMS class sets by joining your student spreadsheets to the generated
-        Secondary class names. Files are read in the browser and never uploaded or committed.
-        Join keys: <strong>School Id</strong> for the iSAMS export and Open Apply,
-        <strong>eSIS Number</strong> for the languages sheet.</p>
+      <p><strong>Grades 6&ndash;10 only.</strong> Primary, Early Years, Mini, DP1, DP2 and the
+        Careers Programme are out of scope and are filtered out of the export; DP set lists
+        will be a separate function. Builds iSAMS class sets by joining your student
+        spreadsheets to the generated MYP class names. Files are read in the browser and never
+        uploaded or committed. Join keys: <strong>School Id</strong> for the iSAMS export and
+        Open Apply, <strong>eSIS Number</strong> for the languages sheet.</p>
       <div class="sl-files">
         <div>
           <label for="slExport">iSAMS export <span class="cn-muted">(required)</span></label>
@@ -3188,8 +3190,17 @@ function setCategory(r) {
 }
 function buildSetLists() {
   const notes = [];
-  const students = sheetToObjects(SL.export, SL_COLS.export)
-    .filter(s => /^current$/i.test(s.status) && /^(6|7|8|9|10)$/.test(String(s.year).trim()));
+  // Grades 6-10 only. Primary, EY, Mini, DP and CP are deliberately out of scope, and the
+  // exclusions are reported so the filter is visible rather than assumed.
+  const allRows = sheetToObjects(SL.export, SL_COLS.export);
+  const current = allRows.filter(s => /^current$/i.test(s.status));
+  const students = current.filter(s => /^(6|7|8|9|10)$/.test(String(s.year).trim()));
+  const excludedByYear = new Map();
+  for (const s of current) {
+    const year = String(s.year).trim();
+    if (/^(6|7|8|9|10)$/.test(year)) continue;
+    excludedByYear.set(year || '(blank)', (excludedByYear.get(year || '(blank)') || 0) + 1);
+  }
   // Languages sheet is the CURRENT year and the export is NEXT year, verified as a uniform
   // +1 shift, so it supplies the subject only — never the class, whose cohorts have changed.
   const langByEsis = new Map();
@@ -3293,6 +3304,13 @@ function buildSetLists() {
         }
       }
     }
+  }
+  const droppedTotal = current.length - students.length;
+  if (droppedTotal) {
+    const detail = Array.from(excludedByYear.entries())
+      .sort((a, b) => (parseInt(a[0], 10) || 99) - (parseInt(b[0], 10) || 99))
+      .map(([y, n]) => `Y${y}: ${n}`).join(', ');
+    notes.push(`Scope is Grades 6-10: kept ${students.length} students, excluded ${droppedTotal} outside scope (${detail}). Rows not marked Current were skipped: ${allRows.length - current.length}.`);
   }
   const optionSets = classes.filter(c => c.cat === 'option').map(c => c.r.name);
   if (optionSets.length) notes.push(`${optionSets.length} Grade 10 option sets cannot be filled without the blocks spreadsheet: ${optionSets.slice(0, 6).join(', ')}${optionSets.length > 6 ? '…' : ''}.`);
