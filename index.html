@@ -729,7 +729,12 @@
           <div class="sl-status" id="slLangsStatus">Not loaded</div>
         </div>
         <div>
-          <label for="slOpenApply">Open Apply <span class="cn-muted">(fallback)</span></label>
+          <label for="slTypeform">Typeform languages <span class="cn-muted">(Grade 6 intake)</span></label>
+          <input type="file" id="slTypeform" accept=".xlsx">
+          <div class="sl-status" id="slTypeformStatus">Not loaded</div>
+        </div>
+        <div>
+          <label for="slOpenApply">Open Apply <span class="cn-muted">(last resort)</span></label>
           <input type="file" id="slOpenApply" accept=".xlsx">
           <div class="sl-status" id="slOpenApplyStatus">Not loaded</div>
         </div>
@@ -3163,13 +3168,15 @@ function teacherLoadHtml(id) {
 // Joins the student spreadsheets to the generated class names and works out who belongs in
 // which set. Rules confirmed with the school; anything not derivable is reported, never
 // guessed. Files stay in the browser.
-const SL = { export: null, langs: null, openApply: null, result: null, view: 'sets' };
+const SL = { export: null, langs: null, typeform: null, openApply: null, result: null, view: 'sets' };
 const SL_COLS = {
   export: { schoolId: [/^school\s*id$/i], form: [/^form$/i], year: [/^year\s*\(nc\)$/i],
             fullName: [/^full\s*name$/i], forename: [/^forename$/i], surname: [/^surname$/i],
             gender: [/^gender$/i], arabic: [/^arabic\s*a\/?b$/i], esis: [/^esis\s*number$/i],
             islamic: [/^islamic$/i], status: [/^system\s*status$/i] },
   langs: { esis: [/^esis\s*number$/i], subject: [/^subject$/i], classes: [/^classes$/i], year: [/^year\s*\(nc\)$/i] },
+  typeform: { schoolId: [/^school\s*id$/i], choice: [/^language$/i], name: [/^full\s*name$/i],
+              date: [/^date$/i], time: [/^time$/i] },
   openApply: { schoolId: [/^student\s*isams\s*id$/i], choice: [/language\s*first\s*choice$/i] }
 };
 // What kind of rule fills a given generated class.
@@ -3205,6 +3212,22 @@ function buildSetLists() {
   // +1 shift, so it supplies the subject only — never the class, whose cohorts have changed.
   const langByEsis = new Map();
   if (SL.langs) for (const r of sheetToObjects(SL.langs, SL_COLS.langs)) if (r.esis) langByEsis.set(String(r.esis).trim(), r);
+  // Typeform is the Grade 6 intake's own choice. A student may answer more than once, so
+  // keep the latest: Date is an Excel day serial and Time a day fraction, which sum to a
+  // sortable timestamp. Where those are missing, a later row wins.
+  const typeformBySchoolId = new Map();
+  let typeformDupes = 0;
+  if (SL.typeform) {
+    const rows = sheetToObjects(SL.typeform, SL_COLS.typeform)
+      .map((r, i) => ({ ...r, order: i, stamp: (Number(r.date) || 0) + (Number(r.time) || 0) }))
+      .sort((a, b) => (a.stamp - b.stamp) || (a.order - b.order));
+    for (const r of rows) {
+      const key = String(r.schoolId || '').trim();
+      if (!key) continue;
+      if (typeformBySchoolId.has(key)) typeformDupes++;
+      typeformBySchoolId.set(key, r);   // later entries overwrite, so the last choice stands
+    }
+  }
   const oaBySchoolId = new Map();
   if (SL.openApply) for (const r of sheetToObjects(SL.openApply, SL_COLS.openApply)) if (r.schoolId) oaBySchoolId.set(String(r.schoolId).trim(), r);
 
@@ -3217,6 +3240,8 @@ function buildSetLists() {
   const pending = [];              // families needing balanced allocation
   const gaps = [];
   const unavailable = [];          // rule applied but no set exists for that cohort
+  const conflicts = [];            // Typeform disagrees with what they already study
+  const sourceTally = new Map();   // where each language decision came from
   const keyOf = s => String(s.schoolId);
 
   for (const s of students) {
@@ -3253,9 +3278,18 @@ function buildSetLists() {
     // 6. Language: continuity, then Open Apply. Year 10 Arabic A take Arabic instead.
     const year = String(s.year).trim();
     if (!(year === '10' && arabic === 'A')) {
+      // Continuity first for students already studying a language, then the Grade 6
+      // Typeform, then Open Apply as the last resort.
       const prior = langByEsis.get(String(s.esis || '').trim());
       let choice = prior ? String(prior.subject || '').trim() : '';
-      if (!choice) choice = String(oaBySchoolId.get(keyOf(s))?.choice || '').trim();
+      let source = choice ? 'continuity' : '';
+      const typeform = String(typeformBySchoolId.get(keyOf(s))?.choice || '').trim();
+      if (choice && typeform && !new RegExp(`^${typeform}`, 'i').test(choice)) {
+        conflicts.push({ student: s, prior: choice, typeform });
+      }
+      if (!choice && typeform) { choice = typeform; source = 'typeform'; }
+      if (!choice) { choice = String(oaBySchoolId.get(keyOf(s))?.choice || '').trim(); source = choice ? 'openApply' : ''; }
+      if (source) sourceTally.set(source, (sourceTally.get(source) || 0) + 1);
       const cat = /^french/i.test(choice) ? 'french' : /^spanish/i.test(choice) ? 'spanish' : '';
       if (cat) {
         const options = pick(form, cat);
@@ -3314,7 +3348,15 @@ function buildSetLists() {
   }
   const optionSets = classes.filter(c => c.cat === 'option').map(c => c.r.name);
   if (optionSets.length) notes.push(`${optionSets.length} Grade 10 option sets cannot be filled without the blocks spreadsheet: ${optionSets.slice(0, 6).join(', ')}${optionSets.length > 6 ? '…' : ''}.`);
-  notes.push(`Languages matched by eSIS: ${students.filter(s => langByEsis.has(String(s.esis || '').trim())).length} of ${students.length}. Open Apply fallback used where no prior row existed.`);
+  notes.push('Language decisions by source — '
+    + ['continuity', 'typeform', 'openApply'].map(k => `${k}: ${sourceTally.get(k) || 0}`).join(', ')
+    + `. Priority is continuity, then Typeform, then Open Apply.`
+    + (typeformDupes ? ` ${typeformDupes} duplicate Typeform response${typeformDupes === 1 ? '' : 's'} resolved by keeping the latest.` : ''));
+  if (conflicts.length) {
+    notes.push(`${conflicts.length} student${conflicts.length === 1 ? '' : 's'} chose a different language in Typeform from the one they already study; continuity was kept. `
+      + conflicts.slice(0, 5).map(c => `${c.student.fullName} (${c.prior} vs ${c.typeform})`).join(', ')
+      + (conflicts.length > 5 ? '…' : ''));
+  }
   const unavailableTally = new Map();
   for (const u of unavailable) unavailableTally.set(u, (unavailableTally.get(u) || 0) + 1);
   if (unavailableTally.size) {
@@ -3328,6 +3370,16 @@ function buildSetLists() {
   for (const s of students) for (const code of assignments.get(keyOf(s))) {
     if (!sets.has(code)) sets.set(code, []);
     sets.get(code).push(s);
+  }
+  // A set well over a normal class size usually means the timetable needs another parallel
+  // group rather than that the allocation is wrong, so surface it rather than balancing
+  // students into a group that does not exist.
+  const oversized = Array.from(sets.entries()).filter(([, list]) => list.length > 30)
+    .sort((a, b) => b[1].length - a[1].length);
+  if (oversized.length) {
+    notes.push(`${oversized.length} set${oversized.length === 1 ? '' : 's'} over 30 students, which may need splitting in aSc: `
+      + oversized.slice(0, 8).map(([code, list]) => `${code} (${list.length})`).join(', ')
+      + (oversized.length > 8 ? '…' : ''));
   }
   return { students, assignments, sets, gaps, notes, keyOf };
 }
@@ -3424,6 +3476,9 @@ document.getElementById('slExport')?.addEventListener('change', async e => {
 });
 document.getElementById('slLangs')?.addEventListener('change', async e => {
   if (e.target.files[0]) { await slLoad('langs', e.target.files[0], 'slLangsStatus', SL_COLS.langs); }
+});
+document.getElementById('slTypeform')?.addEventListener('change', async e => {
+  if (e.target.files[0]) { await slLoad('typeform', e.target.files[0], 'slTypeformStatus', SL_COLS.typeform); }
 });
 document.getElementById('slOpenApply')?.addEventListener('change', async e => {
   if (e.target.files[0]) { await slLoad('openApply', e.target.files[0], 'slOpenApplyStatus', SL_COLS.openApply); }
