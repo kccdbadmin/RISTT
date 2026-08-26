@@ -253,6 +253,15 @@
     .cn-slot { border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:2px 7px; font-size:11px; font-weight:700; color:#334155; white-space:nowrap; }
     .cn-week { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
     .cn-muted { color:var(--muted); font-size:12px; }
+    .sl-files { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; align-items:start; margin:14px 0; }
+    .sl-status { margin-top:5px; font-size:12px; color:var(--muted); line-height:1.35; }
+    .sl-status.ok { color:#0d6848; font-weight:700; }
+    .sl-status.bad { color:#9f2f2f; font-weight:700; }
+    .sl-tabs { display:flex; gap:8px; margin:14px 0 10px; flex-wrap:wrap; }
+    .sl-tab { height:34px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--ink); font-weight:800; padding:0 14px; font-size:13px; }
+    .sl-tab[aria-selected="true"] { background:var(--ink); color:#fff; border-color:var(--ink); }
+    .sl-chip { display:inline-flex; border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:2px 7px; font-size:11px; font-weight:700; color:#334155; margin:1px 2px 1px 0; }
+    .sl-chip.warn { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
     .cn-skipped { margin-top:12px; border:1px solid #f3d7a3; background:var(--warning); color:#5f4208; padding:10px 12px; border-radius:14px; font-size:13px; }
 
     /* --- Whole school grid: classes down, periods across --- */
@@ -445,6 +454,7 @@
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
     <a class="tab-btn" href="https://kccdbadmin.github.io/CPOptions/" target="_blank" rel="noopener">CP options</a>
     <button class="tab-btn tab-btn--utility" data-section="classNamesSection" aria-selected="false" title="Generate canonical class names for Secondary MYP">Class names</button>
+    <button class="tab-btn tab-btn--utility" data-section="setListsSection" aria-selected="false" title="Build iSAMS class set lists from student spreadsheets">Set lists</button>
   </nav>
 
   <section id="timetableSection" class="page-section active" aria-label="Timetable viewer">
@@ -695,6 +705,53 @@
         <table id="cnTable" class="allocation-table cn-table" aria-label="Generated class names"></table>
       </section>
       <div id="cnSkipped"></div>
+    </div>
+  </section>
+
+  <section id="setListsSection" class="page-section" aria-label="Class set lists">
+    <div class="allocation-panel">
+      <h2>Set lists</h2>
+      <p>Builds iSAMS class sets by joining your student spreadsheets to the generated
+        Secondary class names. Files are read in the browser and never uploaded or committed.
+        Join keys: <strong>School Id</strong> for the iSAMS export and Open Apply,
+        <strong>eSIS Number</strong> for the languages sheet.</p>
+      <div class="sl-files">
+        <div>
+          <label for="slExport">iSAMS export <span class="cn-muted">(required)</span></label>
+          <input type="file" id="slExport" accept=".xlsx">
+          <div class="sl-status" id="slExportStatus">Not loaded</div>
+        </div>
+        <div>
+          <label for="slLangs">Current student languages</label>
+          <input type="file" id="slLangs" accept=".xlsx">
+          <div class="sl-status" id="slLangsStatus">Not loaded</div>
+        </div>
+        <div>
+          <label for="slOpenApply">Open Apply <span class="cn-muted">(fallback)</span></label>
+          <input type="file" id="slOpenApply" accept=".xlsx">
+          <div class="sl-status" id="slOpenApplyStatus">Not loaded</div>
+        </div>
+        <div>
+          <label>Build</label>
+          <div class="button-row">
+            <button id="slBuild" class="primary" type="button">Build set lists</button>
+            <button id="slExportCsv" type="button">iSAMS CSV</button>
+          </div>
+        </div>
+      </div>
+      <section class="summary" id="slStats"></section>
+      <div class="sl-tabs">
+        <button class="sl-tab" data-view="sets" aria-selected="true" type="button">Sets</button>
+        <button class="sl-tab" data-view="gaps" aria-selected="false" type="button">Gaps</button>
+        <button class="sl-tab" data-view="students" aria-selected="false" type="button">Students</button>
+      </div>
+      <div>
+        <input type="search" id="slSearch" placeholder="Filter by set, student, form…" style="max-width:340px">
+      </div>
+      <section class="table-wrap allocation-wrap">
+        <table id="slTable" class="allocation-table cn-table" aria-label="Set lists"></table>
+      </section>
+      <div id="slNotes"></div>
     </div>
   </section>
 
@@ -3098,6 +3155,379 @@ function teacherLoadHtml(id) {
         `<tr><td class="ar-item">${esc(g.name)}</td><td class="ar-h">${esc(fmtHours(g.hours))}h</td></tr>`).join('') || '<tr><td>None</td></tr>'}</tbody></table></div>
     </div>
   </div>`;
+}
+
+// --- Set lists -------------------------------------------------------------
+// Joins the student spreadsheets to the generated class names and works out who belongs in
+// which set. Rules confirmed with the school; anything not derivable is reported, never
+// guessed. Files stay in the browser.
+const SL = { export: null, langs: null, openApply: null, result: null, view: 'sets' };
+const SL_COLS = {
+  export: { schoolId: [/^school\s*id$/i], form: [/^form$/i], year: [/^year\s*\(nc\)$/i],
+            fullName: [/^full\s*name$/i], forename: [/^forename$/i], surname: [/^surname$/i],
+            gender: [/^gender$/i], arabic: [/^arabic\s*a\/?b$/i], esis: [/^esis\s*number$/i],
+            islamic: [/^islamic$/i], status: [/^system\s*status$/i] },
+  langs: { esis: [/^esis\s*number$/i], subject: [/^subject$/i], classes: [/^classes$/i], year: [/^year\s*\(nc\)$/i] },
+  openApply: { schoolId: [/^student\s*isams\s*id$/i], choice: [/language\s*first\s*choice$/i] }
+};
+// What kind of rule fills a given generated class.
+function setCategory(r) {
+  if (r.elective) return 'option';
+  const s = r.ev.subject || '';
+  if (/^ARABIC/i.test(s)) return 'arabic';
+  if (/^ISLAMIC/i.test(s)) return 'islamic';
+  if (/^iStudy/i.test(s)) return 'istudy';
+  if (/^UAESS/i.test(s)) return 'uaess';
+  if (/^MSC\b/i.test(s)) return 'msc';
+  if (/^PHE\s*Boys/i.test(s)) return 'pheBoys';
+  if (/^PHE\s*Girls/i.test(s)) return 'pheGirls';
+  if (/^FRENCH/i.test(s)) return 'french';
+  if (/^SPANISH/i.test(s)) return 'spanish';
+  const whole = r.ev.classes.length === 1 && uniq(r.ev.groups).every(g => g === 'Entire class');
+  return whole ? 'whole' : 'cohort';
+}
+function buildSetLists() {
+  const notes = [];
+  const students = sheetToObjects(SL.export, SL_COLS.export)
+    .filter(s => /^current$/i.test(s.status) && /^(6|7|8|9|10)$/.test(String(s.year).trim()));
+  // Languages sheet is the CURRENT year and the export is NEXT year, verified as a uniform
+  // +1 shift, so it supplies the subject only — never the class, whose cohorts have changed.
+  const langByEsis = new Map();
+  if (SL.langs) for (const r of sheetToObjects(SL.langs, SL_COLS.langs)) if (r.esis) langByEsis.set(String(r.esis).trim(), r);
+  const oaBySchoolId = new Map();
+  if (SL.openApply) for (const r of sheetToObjects(SL.openApply, SL_COLS.openApply)) if (r.schoolId) oaBySchoolId.set(String(r.schoolId).trim(), r);
+
+  const classes = refreshClassNames().rows.map(r => ({ r, cat: setCategory(r), forms: r.ev.classes }));
+  const inCohort = (c, form) => c.forms.includes(form);
+  const pick = (form, cat, track) => classes.filter(c =>
+    c.cat === cat && inCohort(c, form) && (track === undefined || c.r.track === track));
+
+  const assignments = new Map();   // student key -> Set of set codes
+  const pending = [];              // families needing balanced allocation
+  const gaps = [];
+  const unavailable = [];          // rule applied but no set exists for that cohort
+  const keyOf = s => String(s.schoolId);
+
+  for (const s of students) {
+    const form = String(s.form).trim();
+    const set = new Set();
+    const arabic = String(s.arabic || '').trim().toUpperCase();
+    const islamic = String(s.islamic || '').trim().toUpperCase();
+    const isMale = /^m/i.test(String(s.gender || ''));
+
+    // 1. Everything the whole homeroom takes, plus cohort-wide classes with no parallel split.
+    for (const c of classes) {
+      if (c.cat === 'whole' && c.forms.length === 1 && c.forms[0] === form) set.add(c.r.name);
+      else if (c.cat === 'cohort' && inCohort(c, form)) set.add(c.r.name);
+    }
+    // 2..5 — one entry per rule; where a rule offers parallel groups, defer to balancing.
+    const rules = [
+      ['arabic', arabic === 'A' ? 'A' : 'B'],
+      [islamic === 'A' ? 'islamic' : islamic === 'B' ? 'islamic' : 'istudy',
+       islamic === 'A' ? 'A' : islamic === 'B' ? 'B' : undefined],
+      [arabic === 'A' ? 'uaess' : 'msc', undefined],
+      [isMale ? 'pheBoys' : 'pheGirls', undefined]
+    ];
+    for (const [cat, track] of rules) {
+      const options = pick(form, cat, track);
+      if (!options.length) {
+        // The rule applies but the timetable offers nothing for this cohort. Silence here
+        // would hide, for example, Grade 10 having no Arabic B set at all.
+        unavailable.push(`Y${String(s.year).trim()} ${cat}${track ? ' ' + track : ''}`);
+        continue;
+      }
+      if (options.length === 1) set.add(options[0].r.name);
+      else pending.push({ key: keyOf(s), male: isMale, options });
+    }
+    // 6. Language: continuity, then Open Apply. Year 10 Arabic A take Arabic instead.
+    const year = String(s.year).trim();
+    if (!(year === '10' && arabic === 'A')) {
+      const prior = langByEsis.get(String(s.esis || '').trim());
+      let choice = prior ? String(prior.subject || '').trim() : '';
+      if (!choice) choice = String(oaBySchoolId.get(keyOf(s))?.choice || '').trim();
+      const cat = /^french/i.test(choice) ? 'french' : /^spanish/i.test(choice) ? 'spanish' : '';
+      if (cat) {
+        const options = pick(form, cat);
+        if (options.length === 1) set.add(options[0].r.name);
+        else if (options.length > 1) pending.push({ key: keyOf(s), male: isMale, options });
+        else gaps.push({ student: s, reason: `No ${choice} set exists for ${form}` });
+      } else if (pick(form, 'french').length || pick(form, 'spanish').length) {
+        gaps.push({ student: s, reason: 'No language choice found in either sheet' });
+      }
+    }
+    assignments.set(keyOf(s), set);
+  }
+  // Balance parallel groups evenly, and evenly between boys and girls, by dealing each
+  // gender round-robin across the available groups.
+  const families = new Map();
+  for (const p of pending) {
+    const id = p.options.map(o => o.r.name).join('|');
+    if (!families.has(id)) families.set(id, { options: p.options, male: [], female: [] });
+    families.get(id)[p.male ? 'male' : 'female'].push(p.key);
+  }
+  for (const fam of families.values()) {
+    const n = fam.options.length;
+    let cursor = 0;
+    for (const bucket of [fam.male, fam.female]) {
+      for (const key of bucket) {
+        assignments.get(key).add(fam.options[cursor % n].r.name);
+        cursor++;
+      }
+    }
+  }
+  // Gap report: a student missing a set that the rest of their cohort has.
+  const byForm = new Map();
+  for (const s of students) {
+    if (!byForm.has(s.form)) byForm.set(s.form, []);
+    byForm.get(s.form).push(s);
+  }
+  for (const [form, list] of byForm) {
+    const counts = new Map();
+    for (const s of list) for (const code of assignments.get(keyOf(s))) counts.set(code, (counts.get(code) || 0) + 1);
+    for (const s of list) {
+      const mine = assignments.get(keyOf(s));
+      for (const [code, n] of counts) {
+        // Only flag near-universal sets, so genuine option splits are not reported as gaps.
+        if (!mine.has(code) && n >= list.length * 0.9) {
+          gaps.push({ student: s, reason: `Not in ${code}, which ${n} of ${list.length} in ${form} have` });
+        }
+      }
+    }
+  }
+  const optionSets = classes.filter(c => c.cat === 'option').map(c => c.r.name);
+  if (optionSets.length) notes.push(`${optionSets.length} Grade 10 option sets cannot be filled without the blocks spreadsheet: ${optionSets.slice(0, 6).join(', ')}${optionSets.length > 6 ? '…' : ''}.`);
+  notes.push(`Languages matched by eSIS: ${students.filter(s => langByEsis.has(String(s.esis || '').trim())).length} of ${students.length}. Open Apply fallback used where no prior row existed.`);
+  const unavailableTally = new Map();
+  for (const u of unavailable) unavailableTally.set(u, (unavailableTally.get(u) || 0) + 1);
+  if (unavailableTally.size) {
+    notes.push('No set exists in the timetable for: '
+      + Array.from(unavailableTally.entries()).sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `${k} (${n} students)`).join(', ')
+      + '. Those students receive no set for that subject — check this is intended.');
+  }
+
+  const sets = new Map();
+  for (const s of students) for (const code of assignments.get(keyOf(s))) {
+    if (!sets.has(code)) sets.set(code, []);
+    sets.get(code).push(s);
+  }
+  return { students, assignments, sets, gaps, notes, keyOf };
+}
+function slStatus(id, text, kind) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; el.className = `sl-status ${kind || ''}`; }
+}
+async function slLoad(which, file, statusId, cols) {
+  try {
+    const parsed = await readXlsx(file);
+    sheetToObjects(parsed, cols);           // validate headers up front
+    SL[which] = parsed;
+    slStatus(statusId, `${file.name} · ${parsed.rows.length - 1} rows`, 'ok');
+  } catch (err) {
+    SL[which] = null;
+    slStatus(statusId, err.message || String(err), 'bad');
+  }
+}
+function renderSetLists() {
+  const table = document.getElementById('slTable');
+  const stats = document.getElementById('slStats');
+  const notes = document.getElementById('slNotes');
+  if (!table) return;
+  const res = SL.result;
+  if (!res) {
+    table.innerHTML = '<tbody><tr><td class="allocation-empty">Load the iSAMS export and press <strong>Build set lists</strong>.</td></tr></tbody>';
+    if (stats) stats.innerHTML = ''; if (notes) notes.innerHTML = '';
+    return;
+  }
+  const q = String(document.getElementById('slSearch')?.value || '').trim().toLowerCase();
+  const withGaps = new Set(res.gaps.map(g => res.keyOf(g.student)));
+  if (stats) {
+    stats.innerHTML = [
+      ['Students', res.students.length, 'Secondary, current'],
+      ['Sets filled', res.sets.size, 'With at least one student'],
+      ['Students with gaps', withGaps.size, 'Missing a set their cohort has'],
+      ['Placements', Array.from(res.assignments.values()).reduce((t, s) => t + s.size, 0), 'Student-to-set rows']
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (SL.view === 'sets') {
+    const rows = Array.from(res.sets.entries())
+      .filter(([code, list]) => !q || code.toLowerCase().includes(q) || list.some(s => String(s.fullName).toLowerCase().includes(q)))
+      .sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+    table.innerHTML = `<thead><tr><th>Set code</th><th>Students</th><th>Forms</th><th>M/F</th><th>Names</th></tr></thead><tbody>${
+      rows.map(([code, list]) => `<tr>
+        <td class="cn-name">${esc(code)}</td>
+        <td><div class="allocation-hours">${esc(list.length)}</div></td>
+        <td>${esc(uniq(list.map(s => s.form)).sort().join(', '))}</td>
+        <td>${esc(list.filter(s => /^m/i.test(s.gender)).length)}/${esc(list.filter(s => !/^m/i.test(s.gender)).length)}</td>
+        <td class="cn-muted">${list.slice(0, 6).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${list.length > 6 ? `<span class="sl-chip warn">+${esc(list.length - 6)}</span>` : ''}</td>
+      </tr>`).join('')}</tbody>`;
+  } else if (SL.view === 'gaps') {
+    const rows = res.gaps.filter(g => !q || String(g.student.fullName).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q));
+    table.innerHTML = rows.length
+      ? `<thead><tr><th>Student</th><th>Form</th><th>Year</th><th>What is missing</th></tr></thead><tbody>${
+        rows.map(g => `<tr><td class="allocation-teacher">${esc(g.student.fullName)}</td><td>${esc(g.student.form)}</td><td>${esc(g.student.year)}</td><td class="cn-muted">${esc(g.reason)}</td></tr>`).join('')}</tbody>`
+      : '<tbody><tr><td class="allocation-empty">No gaps found.</td></tr></tbody>';
+  } else {
+    const rows = res.students.filter(s => !q || String(s.fullName).toLowerCase().includes(q) || String(s.form).toLowerCase().includes(q));
+    table.innerHTML = `<thead><tr><th>Student</th><th>Form</th><th>Ar/Isl</th><th>Sets</th></tr></thead><tbody>${
+      rows.map(s => { const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort();
+        return `<tr><td class="allocation-teacher">${esc(s.fullName)}</td><td>${esc(s.form)}</td>
+          <td class="cn-muted">${esc(s.arabic || '—')}/${esc(s.islamic || '—')}</td>
+          <td>${codes.map(c => `<span class="sl-chip">${esc(c)}</span>`).join('')}</td></tr>`; }).join('')}</tbody>`;
+  }
+  if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
+}
+// iSAMS Set List Import: one row per student, set codes across columns. iSAMS creates the
+// sets from these names, so the generated class names are the set codes.
+function downloadSetImportCsv() {
+  const res = SL.result;
+  if (!res) return;
+  const max = Math.max(20, ...Array.from(res.assignments.values()).map(s => s.size));
+  const header = ['SchoolID', 'PreviousMISID', 'Surname', 'Forename'];
+  for (let i = 1; i <= max; i++) header.push(`Set Code ${i}`);
+  const rows = [header];
+  for (const s of res.students) {
+    const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort();
+    const row = [s.schoolId, '', s.surname, s.forename];
+    for (let i = 0; i < max; i++) row.push(codes[i] || '');
+    rows.push(row);
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'isams_set_list_import.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+document.getElementById('slExport')?.addEventListener('change', async e => {
+  if (e.target.files[0]) { await slLoad('export', e.target.files[0], 'slExportStatus', SL_COLS.export); }
+});
+document.getElementById('slLangs')?.addEventListener('change', async e => {
+  if (e.target.files[0]) { await slLoad('langs', e.target.files[0], 'slLangsStatus', SL_COLS.langs); }
+});
+document.getElementById('slOpenApply')?.addEventListener('change', async e => {
+  if (e.target.files[0]) { await slLoad('openApply', e.target.files[0], 'slOpenApplyStatus', SL_COLS.openApply); }
+});
+document.getElementById('slBuild')?.addEventListener('click', () => {
+  if (activeSourceKey !== 'secondary') { slStatus('slExportStatus', 'Switch the source to Secondary first.', 'bad'); return; }
+  if (!SL.export) { slStatus('slExportStatus', 'Load the iSAMS export first.', 'bad'); return; }
+  try { SL.result = buildSetLists(); renderSetLists(); }
+  catch (err) { slStatus('slExportStatus', err.message || String(err), 'bad'); }
+});
+document.getElementById('slExportCsv')?.addEventListener('click', downloadSetImportCsv);
+document.getElementById('slSearch')?.addEventListener('input', renderSetLists);
+document.querySelectorAll('.sl-tab').forEach(btn => btn.addEventListener('click', () => {
+  SL.view = btn.dataset.view;
+  document.querySelectorAll('.sl-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+  renderSetLists();
+}));
+
+// --- Minimal .xlsx reader --------------------------------------------------
+// An .xlsx is a ZIP of XML. Browsers now inflate natively via DecompressionStream, so the
+// whole thing is readable without a spreadsheet library and the app stays dependency-free.
+// Needs Chrome/Edge 80+, Firefox 113+ or Safari 16.4+.
+async function inflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function readZipEntries(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  // End of central directory, scanned backwards past any trailing comment.
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 66000; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Not a valid .xlsx (no ZIP directory found).');
+  const count = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  const entries = new Map();
+  const decoder = new TextDecoder();
+  for (let i = 0; i < count; i++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break;
+    const method = view.getUint16(offset + 10, true);
+    const compressed = view.getUint32(offset + 20, true);
+    const nameLen = view.getUint16(offset + 28, true);
+    const extraLen = view.getUint16(offset + 30, true);
+    const commentLen = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLen));
+    entries.set(name, { method, compressed, localOffset });
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+  const read = async name => {
+    const entry = entries.get(name);
+    if (!entry) return null;
+    const lo = entry.localOffset;
+    if (view.getUint32(lo, true) !== 0x04034b50) return null;
+    const start = lo + 30 + view.getUint16(lo + 26, true) + view.getUint16(lo + 28, true);
+    const raw = bytes.subarray(start, start + entry.compressed);
+    const out = entry.method === 0 ? raw : await inflateRaw(raw);
+    return new TextDecoder().decode(out);
+  };
+  return { names: Array.from(entries.keys()), read };
+}
+const colToIndex = ref => {
+  let n = 0;
+  for (const ch of String(ref).replace(/\d+/g, '')) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+};
+async function readXlsx(file) {
+  const zip = await readZipEntries(await file.arrayBuffer());
+  const parser = new DOMParser();
+  // Shared strings: cells of type "s" hold an index into this table.
+  const shared = [];
+  const ssXml = await zip.read('xl/sharedStrings.xml');
+  if (ssXml) {
+    for (const si of parser.parseFromString(ssXml, 'application/xml').querySelectorAll('si')) {
+      shared.push(Array.from(si.querySelectorAll('t')).map(t => t.textContent).join(''));
+    }
+  }
+  const wbXml = await zip.read('xl/workbook.xml');
+  const sheetNames = wbXml
+    ? Array.from(parser.parseFromString(wbXml, 'application/xml').querySelectorAll('sheets > sheet')).map(s => s.getAttribute('name'))
+    : [];
+  const sheetPath = zip.names.filter(n => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
+    .sort((a, b) => Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1]))[0];
+  const sheetXml = await zip.read(sheetPath);
+  if (!sheetXml) throw new Error('No worksheet found in the file.');
+  const rows = [];
+  for (const row of parser.parseFromString(sheetXml, 'application/xml').querySelectorAll('sheetData > row')) {
+    const cells = [];
+    for (const c of row.querySelectorAll('c')) {
+      const idx = colToIndex(c.getAttribute('r') || '');
+      let value;
+      if (c.getAttribute('t') === 'inlineStr') value = c.querySelector('is')?.textContent ?? '';
+      else {
+        const raw = c.querySelector('v')?.textContent ?? '';
+        value = c.getAttribute('t') === 's' ? (shared[Number(raw)] ?? '') : raw;
+      }
+      cells[idx] = String(value).trim();
+    }
+    rows.push(cells);
+  }
+  return { sheetName: sheetNames[0] || 'Sheet1', rows };
+}
+// Header-driven lookup so a renamed or reordered column does not silently break the join.
+function sheetToObjects(parsed, required) {
+  const header = (parsed.rows[0] || []).map(h => String(h || '').trim());
+  const index = {};
+  for (const [key, patterns] of Object.entries(required)) {
+    const found = header.findIndex(h => patterns.some(p => p.test(h)));
+    if (found < 0) throw new Error(`Column not found for "${key}". Headers seen: ${header.filter(Boolean).slice(0, 12).join(', ')}`);
+    index[key] = found;
+  }
+  const out = [];
+  for (let i = 1; i < parsed.rows.length; i++) {
+    const row = parsed.rows[i];
+    if (!row || !row.some(v => v)) continue;
+    const obj = {};
+    for (const [key, col] of Object.entries(index)) obj[key] = row[col] ?? '';
+    out.push(obj);
+  }
+  return out;
 }
 
 // --- Printing -------------------------------------------------------------
