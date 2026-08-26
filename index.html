@@ -3168,7 +3168,8 @@ function teacherLoadHtml(id) {
 // Joins the student spreadsheets to the generated class names and works out who belongs in
 // which set. Rules confirmed with the school; anything not derivable is reported, never
 // guessed. Files stay in the browser.
-const SL = { export: null, langs: null, typeform: null, openApply: null, result: null, view: 'sets' };
+const SL = { export: null, langs: null, typeform: null, openApply: null, result: null, view: 'sets',
+             manual: new Map() };   // School Id -> set code chosen by hand in the Gaps view
 const SL_COLS = {
   export: { schoolId: [/^school\s*id$/i], form: [/^form$/i], year: [/^year\s*\(nc\)$/i],
             fullName: [/^full\s*name$/i], forename: [/^forename$/i], surname: [/^surname$/i],
@@ -3277,7 +3278,16 @@ function buildSetLists() {
     }
     // 6. Language: continuity, then Open Apply. Year 10 Arabic A take Arabic instead.
     const year = String(s.year).trim();
-    if (!(year === '10' && arabic === 'A')) {
+    // A hand-picked set from the Gaps view wins over every derived source.
+    const manualPick = SL.manual.get(keyOf(s));
+    if (manualPick) {
+      set.add(manualPick);
+      sourceTally.set('manual', (sourceTally.get('manual') || 0) + 1);
+      // Keep the row visible and still editable, otherwise a choice cannot be revised once
+      // made, which is exactly what balancing a class needs.
+      gaps.push({ student: s, resolved: true, reason: `Assigned by hand`,
+                  candidates: [...pick(form, 'french'), ...pick(form, 'spanish')].map(o => o.r.name) });
+    } else if (!(year === '10' && arabic === 'A')) {
       // Continuity first for students already studying a language, then the Grade 6
       // Typeform, then Open Apply as the last resort.
       const prior = langByEsis.get(String(s.esis || '').trim());
@@ -3297,7 +3307,8 @@ function buildSetLists() {
         else if (options.length > 1) pending.push({ key: keyOf(s), male: isMale, options });
         else gaps.push({ student: s, reason: `No ${choice} set exists for ${form}` });
       } else if (pick(form, 'french').length || pick(form, 'spanish').length) {
-        gaps.push({ student: s, reason: 'No language choice found in either sheet' });
+        gaps.push({ student: s, reason: 'No language choice found in either sheet',
+                    candidates: [...pick(form, 'french'), ...pick(form, 'spanish')].map(o => o.r.name) });
       }
     }
     assignments.set(keyOf(s), set);
@@ -3410,7 +3421,7 @@ function renderSetLists() {
     return;
   }
   const q = String(document.getElementById('slSearch')?.value || '').trim().toLowerCase();
-  const withGaps = new Set(res.gaps.map(g => res.keyOf(g.student)));
+  const withGaps = new Set(res.gaps.filter(g => !g.resolved).map(g => res.keyOf(g.student)));
   if (stats) {
     stats.innerHTML = [
       ['Students', res.students.length, 'Secondary, current'],
@@ -3423,19 +3434,40 @@ function renderSetLists() {
     const rows = Array.from(res.sets.entries())
       .filter(([code, list]) => !q || code.toLowerCase().includes(q) || list.some(s => String(s.fullName).toLowerCase().includes(q)))
       .sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
-    table.innerHTML = `<thead><tr><th>Set code</th><th>Students</th><th>Forms</th><th>M/F</th><th>Names</th></tr></thead><tbody>${
+    table.innerHTML = `<thead><tr><th>Set code</th><th>Students</th><th>Forms</th><th>M/F</th><th>Names</th><th></th></tr></thead><tbody>${
       rows.map(([code, list]) => `<tr>
         <td class="cn-name">${esc(code)}</td>
         <td><div class="allocation-hours">${esc(list.length)}</div></td>
         <td>${esc(uniq(list.map(s => s.form)).sort().join(', '))}</td>
         <td>${esc(list.filter(s => /^m/i.test(s.gender)).length)}/${esc(list.filter(s => !/^m/i.test(s.gender)).length)}</td>
         <td class="cn-muted">${list.slice(0, 6).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${list.length > 6 ? `<span class="sl-chip warn">+${esc(list.length - 6)}</span>` : ''}</td>
+        <td><button type="button" class="sl-set-csv" data-code="${esc(code)}">CSV</button></td>
       </tr>`).join('')}</tbody>`;
   } else if (SL.view === 'gaps') {
-    const rows = res.gaps.filter(g => !q || String(g.student.fullName).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q));
+    const rows = res.gaps
+      .filter(g => !q || String(g.student.fullName).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q))
+      .sort((a, b) => (a.resolved === b.resolved ? 0 : a.resolved ? 1 : -1)
+        || String(a.student.fullName).localeCompare(String(b.student.fullName)));
+    // Each candidate carries its current size so a choice can be made with class balance in
+    // view rather than blind.
+    const sizeOf = code => (res.sets.get(code) || []).length;
     table.innerHTML = rows.length
-      ? `<thead><tr><th>Student</th><th>Form</th><th>Year</th><th>What is missing</th></tr></thead><tbody>${
-        rows.map(g => `<tr><td class="allocation-teacher">${esc(g.student.fullName)}</td><td>${esc(g.student.form)}</td><td>${esc(g.student.year)}</td><td class="cn-muted">${esc(g.reason)}</td></tr>`).join('')}</tbody>`
+      ? `<thead><tr><th>Student</th><th>Form</th><th>Year</th><th>What is missing</th><th>Assign to</th></tr></thead><tbody>${
+        rows.map(g => {
+          const key = res.keyOf(g.student);
+          const chosen = SL.manual.get(key) || '';
+          const options = (g.candidates || []).slice()
+            .sort((a, b) => sizeOf(a) - sizeOf(b) || naturalKey(a).localeCompare(naturalKey(b)));
+          return `<tr${g.resolved ? ' style="opacity:.62"' : ''}>
+            <td class="allocation-teacher">${esc(g.student.fullName)}</td>
+            <td>${esc(g.student.form)}</td><td>${esc(g.student.year)}</td>
+            <td class="cn-muted">${g.resolved ? `<span class="sl-chip">resolved</span> ${esc(g.reason)}` : esc(g.reason)}</td>
+            <td>${options.length
+              ? `<select class="sl-assign" data-key="${esc(key)}"><option value="">— choose —</option>${
+                  options.map(c => `<option value="${esc(c)}"${c === chosen ? ' selected' : ''}>${esc(c)} · ${esc(sizeOf(c))} now</option>`).join('')}</select>`
+              : '<span class="cn-muted">—</span>'}</td>
+          </tr>`;
+        }).join('')}</tbody>`
       : '<tbody><tr><td class="allocation-empty">No gaps found.</td></tr></tbody>';
   } else {
     const rows = res.students.filter(s => !q || String(s.fullName).toLowerCase().includes(q) || String(s.form).toLowerCase().includes(q));
@@ -3488,6 +3520,33 @@ document.getElementById('slBuild')?.addEventListener('click', () => {
   if (!SL.export) { slStatus('slExportStatus', 'Load the iSAMS export first.', 'bad'); return; }
   try { SL.result = buildSetLists(); renderSetLists(); }
   catch (err) { slStatus('slExportStatus', err.message || String(err), 'bad'); }
+});
+// One set at a time, for checking a single set before trusting the whole import.
+function downloadOneSetCsv(code) {
+  const list = SL.result?.sets.get(code);
+  if (!list) return;
+  const rows = [['Set Code', 'SchoolID', 'Surname', 'Forename', 'Full Name', 'Form', 'Year', 'Gender', 'Arabic', 'Islamic']];
+  for (const s of list.slice().sort((a, b) => String(a.surname).localeCompare(String(b.surname)))) {
+    rows.push([code, s.schoolId, s.surname, s.forename, s.fullName, s.form, s.year, s.gender, s.arabic, s.islamic]);
+  }
+  const blob = new Blob([rows.map(r => r.map(csvEscape).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `set_${code.replace(/[^A-Za-z0-9._-]+/g, '_')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+document.getElementById('slTable')?.addEventListener('click', event => {
+  const btn = event.target.closest('.sl-set-csv');
+  if (btn) downloadOneSetCsv(btn.dataset.code);
+});
+document.getElementById('slTable')?.addEventListener('change', event => {
+  const sel = event.target.closest('.sl-assign');
+  if (!sel) return;
+  if (sel.value) SL.manual.set(sel.dataset.key, sel.value); else SL.manual.delete(sel.dataset.key);
+  SL.result = buildSetLists();     // rebuild so counts and gaps reflect the choice
+  renderSetLists();
 });
 document.getElementById('slExportCsv')?.addEventListener('click', downloadSetImportCsv);
 document.getElementById('slSearch')?.addEventListener('input', renderSetLists);
