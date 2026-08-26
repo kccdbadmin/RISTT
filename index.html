@@ -262,6 +262,11 @@
     .sl-tab[aria-selected="true"] { background:var(--ink); color:#fff; border-color:var(--ink); }
     .sl-chip { display:inline-flex; border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:2px 7px; font-size:11px; font-weight:700; color:#334155; margin:1px 2px 1px 0; }
     .sl-chip.warn { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
+    .sl-picker { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .sl-picker input[type="search"] { max-width:300px; }
+    .sl-picker .print-count { min-height:0; }
+    .sl-pick { width:16px; height:16px; accent-color:var(--kcc-green); }
+    .sl-assign { height:32px; font-size:12px; padding:0 8px; max-width:230px; }
     .cn-skipped { margin-top:12px; border:1px solid #f3d7a3; background:var(--warning); color:#5f4208; padding:10px 12px; border-radius:14px; font-size:13px; }
 
     /* --- Whole school grid: classes down, periods across --- */
@@ -752,8 +757,14 @@
         <button class="sl-tab" data-view="gaps" aria-selected="false" type="button">Gaps</button>
         <button class="sl-tab" data-view="students" aria-selected="false" type="button">Students</button>
       </div>
-      <div>
-        <input type="search" id="slSearch" placeholder="Filter by set, student, form…" style="max-width:340px">
+      <div class="sl-picker">
+        <input type="search" id="slSearch" placeholder="Filter by set, student, form…">
+        <div class="button-row">
+          <button id="slPickShown" type="button">Select shown</button>
+          <button id="slPickNone" type="button">Clear</button>
+          <button id="slSheetExport" class="primary" type="button">Export selected to spreadsheet</button>
+        </div>
+        <span class="print-count" id="slPickCount"></span>
       </div>
       <section class="table-wrap allocation-wrap">
         <table id="slTable" class="allocation-table cn-table" aria-label="Set lists"></table>
@@ -3169,7 +3180,8 @@ function teacherLoadHtml(id) {
 // which set. Rules confirmed with the school; anything not derivable is reported, never
 // guessed. Files stay in the browser.
 const SL = { export: null, langs: null, typeform: null, openApply: null, result: null, view: 'sets',
-             manual: new Map() };   // School Id -> set code chosen by hand in the Gaps view
+             manual: new Map(),     // School Id -> set code chosen by hand in the Gaps view
+             selected: new Set() }; // set codes ticked for spreadsheet export
 const SL_COLS = {
   export: { schoolId: [/^school\s*id$/i], form: [/^form$/i], year: [/^year\s*\(nc\)$/i],
             fullName: [/^full\s*name$/i], forename: [/^forename$/i], surname: [/^surname$/i],
@@ -3441,8 +3453,14 @@ function renderSetLists() {
         <td>${esc(uniq(list.map(s => s.form)).sort().join(', '))}</td>
         <td>${esc(list.filter(s => /^m/i.test(s.gender)).length)}/${esc(list.filter(s => !/^m/i.test(s.gender)).length)}</td>
         <td class="cn-muted">${list.slice(0, 6).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${list.length > 6 ? `<span class="sl-chip warn">+${esc(list.length - 6)}</span>` : ''}</td>
-        <td><button type="button" class="sl-set-csv" data-code="${esc(code)}">CSV</button></td>
       </tr>`).join('')}</tbody>`;
+    table.querySelectorAll('tbody tr').forEach((tr, i) => {
+      const code = rows[i][0];
+      const cell = tr.insertCell(0);
+      cell.innerHTML = `<input type="checkbox" class="sl-pick" data-code="${esc(code)}"${SL.selected.has(code) ? ' checked' : ''}>`;
+    });
+    const head = table.querySelector('thead tr');
+    if (head) head.insertCell(0).outerHTML = '<th style="width:34px"></th>';
   } else if (SL.view === 'gaps') {
     const rows = res.gaps
       .filter(g => !q || String(g.student.fullName).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q))
@@ -3477,6 +3495,7 @@ function renderSetLists() {
           <td class="cn-muted">${esc(s.arabic || '—')}/${esc(s.islamic || '—')}</td>
           <td>${codes.map(c => `<span class="sl-chip">${esc(c)}</span>`).join('')}</td></tr>`; }).join('')}</tbody>`;
   }
+  updatePickCount();
   if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
 }
 // iSAMS Set List Import: one row per student, set codes across columns. iSAMS creates the
@@ -3521,25 +3540,49 @@ document.getElementById('slBuild')?.addEventListener('click', () => {
   try { SL.result = buildSetLists(); renderSetLists(); }
   catch (err) { slStatus('slExportStatus', err.message || String(err), 'bad'); }
 });
-// One set at a time, for checking a single set before trusting the whole import.
-function downloadOneSetCsv(code) {
-  const list = SL.result?.sets.get(code);
-  if (!list) return;
-  const rows = [['Set Code', 'SchoolID', 'Surname', 'Forename', 'Full Name', 'Form', 'Year', 'Gender', 'Arabic', 'Islamic']];
-  for (const s of list.slice().sort((a, b) => String(a.surname).localeCompare(String(b.surname)))) {
-    rows.push([code, s.schoolId, s.surname, s.forename, s.fullName, s.form, s.year, s.gender, s.arabic, s.islamic]);
+// Selected sets go to one workbook, a sheet per set, with an index sheet in front so a
+// subject's sets can be checked side by side rather than one file at a time.
+function exportSelectedSets() {
+  const res = SL.result;
+  if (!res) return;
+  const codes = Array.from(SL.selected).filter(c => res.sets.has(c))
+    .sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+  if (!codes.length) { slStatus('slExportStatus', 'Tick at least one set to export.', 'bad'); return; }
+  const index = [['Set code', 'Students', 'Male', 'Female', 'Forms']];
+  for (const code of codes) {
+    const list = res.sets.get(code);
+    index.push([code, list.length,
+      list.filter(s => /^m/i.test(s.gender)).length,
+      list.filter(s => !/^m/i.test(s.gender)).length,
+      uniq(list.map(s => s.form)).sort().join(', ')]);
   }
-  const blob = new Blob([rows.map(r => r.map(csvEscape).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `set_${code.replace(/[^A-Za-z0-9._-]+/g, '_')}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const sheets = [{ name: 'Index', rows: index }];
+  for (const code of codes) {
+    const rows = [['Set Code', 'School Id', 'Surname', 'Forename', 'Full Name', 'Form', 'Year', 'Gender', 'Arabic', 'Islamic']];
+    for (const s of res.sets.get(code).slice().sort((a, b) => String(a.surname).localeCompare(String(b.surname)))) {
+      rows.push([code, s.schoolId, s.surname, s.forename, s.fullName, s.form, s.year, s.gender, s.arabic, s.islamic]);
+    }
+    sheets.push({ name: code, rows });
+  }
+  downloadBlob(writeXlsx(sheets), `set_lists_${codes.length}_sets.xlsx`);
 }
-document.getElementById('slTable')?.addEventListener('click', event => {
-  const btn = event.target.closest('.sl-set-csv');
-  if (btn) downloadOneSetCsv(btn.dataset.code);
+function updatePickCount() {
+  const el = document.getElementById('slPickCount');
+  if (el) el.innerHTML = `<span><strong>${esc(SL.selected.size)}</strong> set${SL.selected.size === 1 ? '' : 's'} selected</span>`;
+}
+document.getElementById('slSheetExport')?.addEventListener('click', exportSelectedSets);
+// "Select shown" works on whatever the search has filtered to, so typing a subject and
+// clicking it selects that subject's sets in one go.
+document.getElementById('slPickShown')?.addEventListener('click', () => {
+  document.querySelectorAll('.sl-pick').forEach(b => SL.selected.add(b.dataset.code));
+  renderSetLists();
+});
+document.getElementById('slPickNone')?.addEventListener('click', () => { SL.selected.clear(); renderSetLists(); });
+document.getElementById('slTable')?.addEventListener('change', event => {
+  const box = event.target.closest('.sl-pick');
+  if (!box) return;
+  if (box.checked) SL.selected.add(box.dataset.code); else SL.selected.delete(box.dataset.code);
+  updatePickCount();
 });
 document.getElementById('slTable')?.addEventListener('change', event => {
   const sel = event.target.closest('.sl-assign');
@@ -3555,6 +3598,131 @@ document.querySelectorAll('.sl-tab').forEach(btn => btn.addEventListener('click'
   document.querySelectorAll('.sl-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
   renderSetLists();
 }));
+
+// --- Minimal .xlsx writer --------------------------------------------------
+// Writes a real multi-sheet workbook without a library. ZIP entries are stored rather than
+// deflated, which needs no compressor, and cells use inline strings so no shared-string
+// table is required. Good enough for set lists; not a general spreadsheet writer.
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function buildZip(files) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(file.name);
+    const crc = crc32(file.data);
+    const header = new Uint8Array(30 + name.length);
+    const dv = new DataView(header.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(8, 0, true);            // method 0 = stored
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, file.data.length, true);
+    dv.setUint32(22, file.data.length, true);
+    dv.setUint16(26, name.length, true);
+    header.set(name, 30);
+    parts.push(header, file.data);
+    central.push({ name, crc, size: file.data.length, offset });
+    offset += header.length + file.data.length;
+  }
+  const directoryStart = offset;
+  for (const entry of central) {
+    const record = new Uint8Array(46 + entry.name.length);
+    const dv = new DataView(record.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint32(16, entry.crc, true);
+    dv.setUint32(20, entry.size, true);
+    dv.setUint32(24, entry.size, true);
+    dv.setUint16(28, entry.name.length, true);
+    dv.setUint32(42, entry.offset, true);
+    record.set(entry.name, 46);
+    parts.push(record);
+    offset += record.length;
+  }
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0, 0x06054b50, true);
+  dv.setUint16(8, central.length, true);
+  dv.setUint16(10, central.length, true);
+  dv.setUint32(12, offset - directoryStart, true);
+  dv.setUint32(16, directoryStart, true);
+  parts.push(eocd);
+  return new Blob(parts, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const xmlEscape = v => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[ch]));
+const colName = n => { let s = ''; n++; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = (n - r - 1) / 26; } return s; };
+// Excel sheet names: 31 characters, no []:*?/\ and unique within the workbook.
+function safeSheetName(name, taken) {
+  let base = String(name || 'Sheet').replace(/[\[\]:*?\/\\]/g, '-').slice(0, 31) || 'Sheet';
+  let candidate = base, n = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    const suffix = `~${n++}`;
+    candidate = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+function writeXlsx(sheets) {
+  const encoder = new TextEncoder();
+  const taken = new Set();
+  const named = sheets.map(s => ({ ...s, name: safeSheetName(s.name, taken) }));
+  const files = [];
+  const sheetXml = rows => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+    + rows.map((row, r) => `<row r="${r + 1}">` + row.map((cell, c) =>
+        `<c r="${colName(c)}${r + 1}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(cell)}</t></is></c>`).join('') + '</row>').join('')
+    + '</sheetData></worksheet>';
+  named.forEach((s, i) => files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, data: encoder.encode(sheetXml(s.rows)) }));
+  files.push({ name: '[Content_Types].xml', data: encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    + '<Default Extension="xml" ContentType="application/xml"/>'
+    + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    + named.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
+    + '</Types>') });
+  files.push({ name: '_rels/.rels', data: encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+    + '</Relationships>') });
+  files.push({ name: 'xl/workbook.xml', data: encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+    + named.map((s, i) => `<sheet name="${xmlEscape(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')
+    + '</sheets></workbook>') });
+  files.push({ name: 'xl/_rels/workbook.xml.rels', data: encoder.encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + named.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')
+    + '</Relationships>') });
+  return buildZip(files);
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // --- Minimal .xlsx reader --------------------------------------------------
 // An .xlsx is a ZIP of XML. Browsers now inflate natively via DecompressionStream, so the
