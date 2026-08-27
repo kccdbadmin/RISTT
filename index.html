@@ -752,7 +752,7 @@
           <label>Build</label>
           <div class="button-row">
             <button id="slBuild" class="primary" type="button">Build set lists</button>
-            <button id="slExportCsv" type="button">iSAMS CSV</button>
+            <button id="slExportImport" type="button">iSAMS import sheet</button>
           </div>
         </div>
       </div>
@@ -3597,7 +3597,7 @@ function renderSetLists() {
 }
 // iSAMS Set List Import: one row per student, set codes across columns. iSAMS creates the
 // sets from these names, so the generated class names are the set codes.
-function downloadSetImportCsv() {
+function downloadSetImport() {
   const res = SL.result;
   if (!res) return;
   const max = Math.max(20, ...Array.from(res.assignments.values()).map(s => s.size));
@@ -3610,14 +3610,7 @@ function downloadSetImportCsv() {
     for (let i = 0; i < max; i++) row.push(codes[i] || '');
     rows.push(row);
   }
-  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'isams_set_list_import.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(writeXlsx([{ name: 'Set List Import', rows }]), 'isams_set_list_import.xlsx');
 }
 document.getElementById('slExport')?.addEventListener('change', async e => {
   if (e.target.files[0]) { await slLoad('export', e.target.files[0], 'slExportStatus', SL_COLS.export); }
@@ -3701,7 +3694,7 @@ document.getElementById('slTable')?.addEventListener('change', event => {
   SL.result = buildSetLists();     // rebuild so counts and gaps reflect the choice
   renderSetLists();
 });
-document.getElementById('slExportCsv')?.addEventListener('click', downloadSetImportCsv);
+document.getElementById('slExportImport')?.addEventListener('click', downloadSetImport);
 document.getElementById('slSearch')?.addEventListener('input', renderSetLists);
 document.querySelectorAll('.sl-tab').forEach(btn => btn.addEventListener('click', () => {
   SL.view = btn.dataset.view;
