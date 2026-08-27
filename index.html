@@ -262,6 +262,8 @@
     .sl-tab[aria-selected="true"] { background:var(--ink); color:#fff; border-color:var(--ink); }
     .sl-chip { display:inline-flex; border:1px solid #dfe7ef; border-radius:999px; background:#fbfcfe; padding:2px 7px; font-size:11px; font-weight:700; color:#334155; margin:1px 2px 1px 0; }
     .sl-chip.warn { border-color:#f3d7a3; background:#fff9ec; color:#77510b; }
+    .sl-big > td { background:#fff9ec; }
+    .sl-split { height:30px; font-size:12px; }
     .sl-picker { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
     .sl-picker input[type="search"] { max-width:300px; }
     .sl-picker .print-count { min-height:0; }
@@ -759,6 +761,7 @@
       <section class="summary" id="slStats"></section>
       <div class="sl-tabs">
         <button class="sl-tab" data-view="sets" aria-selected="true" type="button">Sets</button>
+        <button class="sl-tab" data-view="splits" aria-selected="false" type="button">Splits</button>
         <button class="sl-tab" data-view="gaps" aria-selected="false" type="button">Gaps</button>
         <button class="sl-tab" data-view="students" aria-selected="false" type="button">Students</button>
       </div>
@@ -3186,7 +3189,18 @@ function teacherLoadHtml(id) {
 // guessed. Files stay in the browser.
 const SL = { export: null, langs: null, typeform: null, openApply: null, electives: null, result: null, view: 'sets',
              manual: new Map(),     // School Id -> set code chosen by hand in the Gaps view
+             splits: new Map(),     // set code -> how many rotation groups to divide it into
              selected: new Set() }; // set codes ticked for spreadsheet export
+// Split choices are deliberate configuration rather than a by-product of the upload, so they
+// outlive a reload even though the spreadsheets themselves have to be loaded again.
+const SL_SPLIT_KEY = 'ristt.setsplits.v1';
+function saveSplits() {
+  try { localStorage.setItem(SL_SPLIT_KEY, JSON.stringify(Array.from(SL.splits))); } catch (err) { /* private mode */ }
+}
+function restoreSplits() {
+  try { SL.splits = new Map(JSON.parse(localStorage.getItem(SL_SPLIT_KEY)) || []); } catch (err) { SL.splits = new Map(); }
+}
+restoreSplits();
 const SL_COLS = {
   export: { schoolId: [/^school\s*id$/i], form: [/^form$/i], year: [/^year\s*\(nc\)$/i],
             fullName: [/^full\s*name$/i], forename: [/^forename$/i], surname: [/^surname$/i],
@@ -3237,6 +3251,38 @@ function matchStudentByName(name, candidates) {
   });
   if (fuzzy.length === 1) return { student: fuzzy[0], how: 'name' };
   return { student: null, how: fuzzy.length > 1 ? 'ambiguous' : 'none' };
+}
+// Divide a roster into n groups that stay balanced on gender and on home form, so halving a
+// cohort's Spanish set cannot leave one group all boys or all 7A. Members are dealt out
+// stratum by stratum with the cursor carried across, which spreads each stratum evenly and
+// stops a run of small strata all landing in group 1. Ordering is by School Id, so the same
+// roster always produces the same groups and rebuilding never reshuffles a class.
+// Groups may start pre-loaded with students pinned there by hand; the rest are dealt around
+// them so the pins do not unbalance the result.
+function splitRoster(list, n, seed) {
+  const strata = new Map();
+  for (const s of list) {
+    const key = `${/^m/i.test(s.gender) ? 'M' : 'F'}|${s.form}`;
+    if (!strata.has(key)) strata.set(key, []);
+    strata.get(key).push(s);
+  }
+  const groups = Array.from({ length: n }, (_, i) => (seed && seed[i] ? seed[i].slice() : []));
+  let cursor = 0;
+  for (const key of Array.from(strata.keys()).sort()) {
+    const members = strata.get(key).slice()
+      .sort((a, b) => String(a.schoolId).localeCompare(String(b.schoolId), undefined, { numeric: true }));
+    for (const s of members) {
+      // Smallest group wins, scanning from the cursor so equal groups are filled in turn.
+      let best = cursor % n;
+      for (let k = 1; k < n; k++) {
+        const i = (cursor + k) % n;
+        if (groups[i].length < groups[best].length) best = i;
+      }
+      groups[best].push(s);
+      cursor = best + 1;
+    }
+  }
+  return groups;
 }
 // What kind of rule fills a given generated class.
 function setCategory(r) {
@@ -3298,6 +3344,17 @@ function buildSetLists() {
   const assignments = new Map();   // student key -> Set of set codes
   const pending = [];              // families needing balanced allocation
   const gaps = [];
+  const pins = new Map();          // student key -> { code, pin }: hand-picked half of a split
+  // A hand-picked set can name one half of a split, like 7ABC.Spanish.2. Rosters are built
+  // against the undivided set, so the choice is recorded against the base with the half kept
+  // as a pin for the split step. The base having a generated name of its own is what marks
+  // the trailing number as a split index: a genuine class called 6ABC.Arabic.2 exists only
+  // where there is no plain 6ABC.Arabic, so it is left alone.
+  const knownCodes = new Set(classes.map(c => c.r.name));
+  const manualBase = choice => {
+    const m = /^(.*)\.(\d+)$/.exec(String(choice || ''));
+    return m && knownCodes.has(m[1]) ? { code: m[1], pin: Number(m[2]) } : { code: choice, pin: 0 };
+  };
   const unavailable = [];          // rule applied but no set exists for that cohort
   const conflicts = [];            // Typeform disagrees with what they already study
   const sourceTally = new Map();   // where each language decision came from
@@ -3339,7 +3396,9 @@ function buildSetLists() {
     // A hand-picked set from the Gaps view wins over every derived source.
     const manualPick = SL.manual.get(keyOf(s));
     if (manualPick) {
-      set.add(manualPick);
+      const { code, pin } = manualBase(manualPick);
+      set.add(code);
+      if (pin) pins.set(keyOf(s), { code, pin });
       sourceTally.set('manual', (sourceTally.get('manual') || 0) + 1);
       // Keep the row visible and still editable, otherwise a choice cannot be revised once
       // made, which is exactly what balancing a class needs.
@@ -3491,17 +3550,67 @@ function buildSetLists() {
     if (!sets.has(code)) sets.set(code, []);
     sets.get(code).push(s);
   }
+  // Concurrent blocks put a whole cohort's takers in one roster even though they are taught
+  // as halves that rotate: Spanish, French, PHE Boys and PHE Girls all run in the same
+  // periods with one teacher each, so a student does the language for part of the block and
+  // PHE for the rest. aSc has nothing to split -- one lesson, one teacher -- which makes this
+  // a roster decision, so the halves are chosen here and given indexed names.
+  const splitReport = [];
+  const splitChildren = new Map();       // base code -> the codes that replaced it
+  for (const [code, n] of SL.splits) {
+    const list = sets.get(code);
+    if (!list || !(n > 1)) continue;
+    const seed = Array.from({ length: n }, () => []);
+    const free = [];
+    for (const s of list) {
+      const p = pins.get(keyOf(s));
+      if (p && p.code === code && p.pin >= 1 && p.pin <= n) seed[p.pin - 1].push(s);
+      else free.push(s);
+    }
+    const groups = splitRoster(free, n, seed);
+    const names = groups.map((_, i) => `${code}.${i + 1}`);
+    sets.delete(code);
+    groups.forEach((group, i) => {
+      sets.set(names[i], group);
+      for (const s of group) {
+        const own = assignments.get(keyOf(s));
+        own.delete(code);
+        own.add(names[i]);
+      }
+    });
+    splitChildren.set(code, names);
+    splitReport.push(`${code} → ${groups.map((g, i) => `${names[i]} (${g.length})`).join(', ')}`);
+  }
+  if (splitReport.length) {
+    notes.push(`Split into rotation groups, balanced on gender and home form: ${splitReport.join('; ')}.`);
+  }
+  // The Splits tab works against undivided rosters, so a divided set is reported at the sum
+  // of its halves rather than as separate entries that could not be recombined.
+  const baseSizes = new Map(Array.from(sets, ([code, list]) => [code, list.length]));
+  for (const [code, names] of splitChildren) {
+    baseSizes.set(code, names.reduce((total, name) => total + (sets.get(name) || []).length, 0));
+    for (const name of names) baseSizes.delete(name);
+  }
+  // A gap offering a set that has since been split must offer the halves instead, or the
+  // choice would name a set that no longer exists.
+  if (splitChildren.size) {
+    for (const g of gaps) {
+      if (!g.candidates) continue;
+      g.candidates = g.candidates.flatMap(c => splitChildren.get(c) || [c]);
+    }
+  }
   // A set well over a normal class size usually means the timetable needs another parallel
   // group rather than that the allocation is wrong, so surface it rather than balancing
   // students into a group that does not exist.
   const oversized = Array.from(sets.entries()).filter(([, list]) => list.length > 30)
     .sort((a, b) => b[1].length - a[1].length);
   if (oversized.length) {
-    notes.push(`${oversized.length} set${oversized.length === 1 ? '' : 's'} over 30 students, which may need splitting in aSc: `
+    notes.push(`${oversized.length} set${oversized.length === 1 ? '' : 's'} over 30 students: `
       + oversized.slice(0, 8).map(([code, list]) => `${code} (${list.length})`).join(', ')
-      + (oversized.length > 8 ? '…' : ''));
+      + (oversized.length > 8 ? '…' : '')
+      + '. Divide one on the Splits tab if it is taught as a rotation.');
   }
-  return { students, assignments, sets, gaps, notes, keyOf };
+  return { students, assignments, sets, gaps, notes, keyOf, baseSizes, splitChildren };
 }
 function slStatus(id, text, kind) {
   const el = document.getElementById(id);
@@ -3558,6 +3667,28 @@ function renderSetLists() {
     });
     const head = table.querySelector('thead tr');
     if (head) head.insertCell(0).outerHTML = '<th style="width:34px"></th>';
+  } else if (SL.view === 'splits') {
+    // Listed against the undivided roster, so the count can be raised or lowered at will
+    // rather than only ever cut further.
+    const rows = Array.from(res.baseSizes.entries())
+      .filter(([code]) => !q || code.toLowerCase().includes(q))
+      .sort((a, b) => b[1] - a[1] || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+    table.innerHTML = `<thead><tr><th>Set code</th><th>Students</th><th>Split into</th><th>Result</th></tr></thead><tbody>${
+      rows.map(([code, size]) => {
+        const n = SL.splits.get(code) || 1;
+        const parts = res.splitChildren.get(code) || [];
+        const sizes = parts.map(p => (res.sets.get(p) || []).length);
+        return `<tr${size > 30 && n === 1 ? ' class="sl-big"' : ''}>
+          <td class="cn-name">${esc(code)}</td>
+          <td><div class="allocation-hours">${esc(size)}</div></td>
+          <td><select class="sl-split" data-code="${esc(code)}">${
+            [1, 2, 3, 4, 5, 6].map(v => `<option value="${v}"${v === n ? ' selected' : ''}>${
+              v === 1 ? 'Keep whole' : `${v} groups · ~${Math.ceil(size / v)} each`}</option>`).join('')}</select></td>
+          <td class="cn-muted">${parts.length
+            ? parts.map((p, i) => `<span class="sl-chip">${esc(p)} · ${esc(sizes[i])}</span>`).join('')
+            : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>`;
   } else if (SL.view === 'gaps') {
     const rows = res.gaps
       .filter(g => !q || String(g.student.fullName).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q))
@@ -3692,6 +3823,20 @@ document.getElementById('slTable')?.addEventListener('change', event => {
   if (!sel) return;
   if (sel.value) SL.manual.set(sel.dataset.key, sel.value); else SL.manual.delete(sel.dataset.key);
   SL.result = buildSetLists();     // rebuild so counts and gaps reflect the choice
+  renderSetLists();
+});
+document.getElementById('slTable')?.addEventListener('change', event => {
+  const sel = event.target.closest('.sl-split');
+  if (!sel) return;
+  const n = Number(sel.value);
+  const code = sel.dataset.code;
+  // Ticks follow the rename, so a set selected for export stays selected once divided.
+  const wasPicked = SL.selected.delete(code);
+  for (const c of Array.from(SL.selected)) if (c.startsWith(`${code}.`)) SL.selected.delete(c);
+  if (n > 1) SL.splits.set(code, n); else SL.splits.delete(code);
+  saveSplits();
+  SL.result = buildSetLists();
+  if (wasPicked) for (const c of (SL.result.splitChildren.get(code) || [code])) SL.selected.add(c);
   renderSetLists();
 });
 document.getElementById('slExportImport')?.addEventListener('click', downloadSetImport);
