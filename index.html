@@ -3930,7 +3930,9 @@ function dpParseAllocation(parsed) {
     students.push({
       name,
       status: statusCol >= 0 ? String(row[statusCol] || '').trim() : '',
-      sections: blocks.map(b => String(row[b.col] || '').trim()).filter(v => !DP_EMPTY.test(v))
+      // The block is kept alongside the section: the import sheet names each set by it.
+      sections: blocks.map(b => ({ block: b.label, section: String(row[b.col] || '').trim() }))
+        .filter(x => !DP_EMPTY.test(x.section))
     });
   }
   if (!students.length) throw new Error('No student rows found under the "Student name" header.');
@@ -3958,6 +3960,7 @@ function buildDpSets() {
   const excluded = [];
   const matched = new Set();
   const notes = [];
+  const blockOf = new Map();       // set code -> the block(s) it was seen in
   if (!cohort.length) {
     notes.push('No DP1 students in the export: no row has a Form beginning "DP1". Check the export covers the DP cohort.');
   }
@@ -3977,7 +3980,12 @@ function buildDpSets() {
     matched.add(key);
     record.set(key, hit.student);
     if (!assignments.has(key)) assignments.set(key, new Set());
-    for (const section of row.sections) assignments.get(key).add(DP_PREFIX + section);
+    for (const { block, section } of row.sections) {
+      const code = DP_PREFIX + section;
+      assignments.get(key).add(code);
+      if (!blockOf.has(code)) blockOf.set(code, new Set());
+      blockOf.get(code).add(block);
+    }
     if (!row.sections.length) {
       excluded.push({ name: hit.student.fullName, student: hit.student, kind: 'noBlocks', status: row.status,
         reason: row.status ? `No block allocation — ${row.status}` : 'No block allocation in the workbook' });
@@ -4034,7 +4042,7 @@ function buildDpSets() {
   }
   // Section rolls from the matrix against the student table, as described in dpParseAllocation.
   const counted = new Map();
-  for (const row of parsed.students) for (const section of row.sections) counted.set(section, (counted.get(section) || 0) + 1);
+  for (const row of parsed.students) for (const { section } of row.sections) counted.set(section, (counted.get(section) || 0) + 1);
   const short = [];
   for (const [section, roll] of parsed.declared) {
     const actual = counted.get(section) || 0;
@@ -4052,7 +4060,19 @@ function buildDpSets() {
   if (unknown.length) {
     notes.push(`${unknown.length} section${unknown.length === 1 ? '' : 's'} appear against students but are not in the course matrix: ${unknown.join(', ')}.`);
   }
-  return { students, assignments, sets, excluded, notes, keyOf, cohortSize: cohort.length };
+  // One section sits in exactly one block. If the workbook ever says otherwise the set cannot
+  // be named by block, so leave it undecorated and say so rather than picking one at random.
+  const blocks = new Map();
+  const straddling = [];
+  for (const [code, seen] of blockOf) {
+    if (seen.size === 1) blocks.set(code, Array.from(seen)[0]);
+    else straddling.push(`${code} (${Array.from(seen).sort().join(', ')})`);
+  }
+  if (straddling.length) {
+    notes.push(`${straddling.length} section${straddling.length === 1 ? ' appears' : 's appear'} in more than one block, so `
+      + `${straddling.length === 1 ? 'its set is' : 'their sets are'} left unnamed by block in the import sheet: ${straddling.join(', ')}.`);
+  }
+  return { students, assignments, sets, excluded, notes, keyOf, cohortSize: cohort.length, blocks };
 }
 function dpStatus(id, text, kind) {
   const el = document.getElementById(id);
@@ -4082,10 +4102,11 @@ function renderDpSets() {
     const rows = Array.from(res.sets.entries())
       .filter(([code, list]) => !q || code.toLowerCase().includes(q) || list.some(s => String(s.fullName).toLowerCase().includes(q)))
       .sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
-    table.innerHTML = `<thead><tr><th style="width:34px"></th><th>Set code</th><th>Students</th><th>Forms</th><th>Names</th></tr></thead><tbody>${
+    table.innerHTML = `<thead><tr><th style="width:34px"></th><th>Set code</th><th>Block</th><th>Students</th><th>Forms</th><th>Names</th></tr></thead><tbody>${
       rows.map(([code, list]) => `<tr>
         <td><input type="checkbox" class="dp-pick" data-code="${esc(code)}"${DP.selected.has(code) ? ' checked' : ''}></td>
         <td class="cn-name">${esc(code)}</td>
+        <td class="cn-muted">${esc(res.blocks.get(code) || '—')}</td>
         <td><div class="allocation-hours">${esc(list.length)}</div></td>
         <td>${esc(uniq(list.map(s => s.form)).sort().join(', '))}</td>
         <td class="cn-muted">${list.slice(0, 6).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${
@@ -4118,6 +4139,12 @@ function renderDpSets() {
   if (count) count.innerHTML = `<span><strong>${esc(DP.selected.size)}</strong> set${DP.selected.size === 1 ? '' : 's'} selected</span>`;
   if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
 }
+// iSAMS creates the sets from these names, so each one carries the block it runs in. Islamic
+// is not blocked and keeps its plain name.
+function dpImportCode(code, res) {
+  const block = res.blocks.get(code);
+  return block ? `${code} - ${block}` : code;
+}
 function dpDownloadImport() {
   const res = DP.result;
   if (!res) return;
@@ -4126,7 +4153,7 @@ function dpDownloadImport() {
   for (let i = 1; i <= max; i++) header.push(`Set Code ${i}`);
   const rows = [header];
   for (const s of res.students) {
-    const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort();
+    const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort().map(c => dpImportCode(c, res));
     const row = [s.schoolId, '', s.surname, s.forename];
     for (let i = 0; i < max; i++) row.push(codes[i] || '');
     rows.push(row);
