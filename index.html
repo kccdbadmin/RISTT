@@ -462,6 +462,7 @@
     <a class="tab-btn" href="https://kccdbadmin.github.io/CPOptions/" target="_blank" rel="noopener">CP options</a>
     <button class="tab-btn tab-btn--utility" data-section="classNamesSection" aria-selected="false" title="Generate canonical class names for Secondary MYP">Class names</button>
     <button class="tab-btn tab-btn--utility" data-section="setListsSection" aria-selected="false" title="Build iSAMS class set lists from student spreadsheets">Set lists</button>
+    <button class="tab-btn tab-btn--utility" data-section="dpSetsSection" aria-selected="false" title="Build iSAMS DP1 set lists from the DP choices workbook">DP set lists</button>
   </nav>
 
   <section id="timetableSection" class="page-section active" aria-label="Timetable viewer">
@@ -778,6 +779,56 @@
         <table id="slTable" class="allocation-table cn-table" aria-label="Set lists"></table>
       </section>
       <div id="slNotes"></div>
+    </div>
+  </section>
+
+  <section id="dpSetsSection" class="page-section" aria-label="DP set lists">
+    <div class="allocation-panel">
+      <h2>DP set lists</h2>
+      <p><strong>DP1 only.</strong> Builds iSAMS class sets from the DP choices validation
+        workbook. Only the <strong>Updated Allocation</strong> tab is read: each student's six
+        block sections become sets named <code>DP1 - &lt;section&gt;</code>, and Islamic A and B
+        from the iSAMS export become <code>DP1 - Islamic A</code> and <code>DP1 - Islamic B</code>.
+        The workbook carries no School Id, so students are matched by name against the export's
+        DP1 cohort. Files are read in the browser and never uploaded or committed.</p>
+      <div class="sl-files">
+        <div>
+          <label for="dpExport">iSAMS export <span class="cn-muted">(required)</span></label>
+          <input type="file" id="dpExport" accept=".xlsx">
+          <div class="sl-status" id="dpExportStatus">Not loaded</div>
+        </div>
+        <div>
+          <label for="dpChoices">DP choices validation <span class="cn-muted">(required)</span></label>
+          <input type="file" id="dpChoices" accept=".xlsx">
+          <div class="sl-status" id="dpChoicesStatus">Not loaded</div>
+        </div>
+        <div>
+          <label>Build</label>
+          <div class="button-row">
+            <button id="dpBuild" class="primary" type="button">Build DP sets</button>
+            <button id="dpExportImport" type="button">iSAMS import sheet</button>
+          </div>
+        </div>
+      </div>
+      <section class="summary" id="dpStats"></section>
+      <div class="sl-tabs">
+        <button class="dp-tab" data-view="sets" aria-selected="true" type="button">Sets</button>
+        <button class="dp-tab" data-view="excluded" aria-selected="false" type="button">Not exported</button>
+        <button class="dp-tab" data-view="students" aria-selected="false" type="button">Students</button>
+      </div>
+      <div class="sl-picker">
+        <input type="search" id="dpSearch" placeholder="Filter by set, student, form…">
+        <div class="button-row">
+          <button id="dpPickShown" type="button">Select shown</button>
+          <button id="dpPickNone" type="button">Clear</button>
+          <button id="dpSheetExport" class="primary" type="button">Export selected to spreadsheet</button>
+        </div>
+        <span class="print-count" id="dpPickCount"></span>
+      </div>
+      <section class="table-wrap allocation-wrap">
+        <table id="dpTable" class="allocation-table cn-table" aria-label="DP set lists"></table>
+      </section>
+      <div id="dpNotes"></div>
     </div>
   </section>
 
@@ -3845,6 +3896,309 @@ document.querySelectorAll('.sl-tab').forEach(btn => btn.addEventListener('click'
   SL.view = btn.dataset.view;
   document.querySelectorAll('.sl-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
   renderSetLists();
+}));
+
+// --- DP set lists ---------------------------------------------------------
+// DP1 sets come from the choices validation workbook rather than from aSc: the timetable
+// carries the six blocks but not which section each student sits in. Only the Updated
+// Allocation tab is read, and only the student table within it -- the same sheet opens with a
+// course-by-block matrix, which is reference material rather than allocation.
+const DP = { export: null, choices: null, result: null, view: 'sets', selected: new Set() };
+const DP_PREFIX = 'DP1 - ';
+// An unfilled section. Unplaceable students carry an em dash in every block.
+const DP_EMPTY = /^(-|—|–|n\/?a|tbc)?$/i;
+function dpParseAllocation(parsed) {
+  const sheet = (parsed.sheets || []).find(s => /updated\s*allocation/i.test(s.name));
+  if (!sheet) throw new Error(`No "Updated Allocation" tab. Sheets: ${(parsed.sheets || []).map(s => s.name).join(', ')}`);
+  // The student table starts partway down, under its own header row.
+  const headerAt = sheet.rows.findIndex(r => /^student\s*name$/i.test(String(r[0] || '').trim()));
+  if (headerAt < 0) throw new Error('The Updated Allocation tab has no "Student name" header row.');
+  const header = sheet.rows[headerAt];
+  const blocks = [];
+  let statusCol = -1;
+  for (let i = 1; i < header.length; i++) {
+    const label = String(header[i] || '').trim();
+    if (/^block\b/i.test(label)) blocks.push({ col: i, label });
+    else if (/^status$/i.test(label)) statusCol = i;
+  }
+  if (!blocks.length) throw new Error('No "Block …" columns found on the Updated Allocation tab.');
+  const students = [];
+  for (let r = headerAt + 1; r < sheet.rows.length; r++) {
+    const row = sheet.rows[r];
+    const name = String(row[0] || '').trim();
+    if (!name) continue;
+    students.push({
+      name,
+      status: statusCol >= 0 ? String(row[statusCol] || '').trim() : '',
+      sections: blocks.map(b => String(row[b.col] || '').trim()).filter(v => !DP_EMPTY.test(v))
+    });
+  }
+  if (!students.length) throw new Error('No student rows found under the "Student name" header.');
+  // The same tab opens with a course-by-block matrix listing each section and its roll, as
+  // "Theatre (7)". Those counts are derived independently of the student table below, so
+  // comparing the two catches a student who has dropped out of the table altogether -- which
+  // would otherwise cost them their entire enrolment silently.
+  const declared = new Map();
+  for (const row of sheet.rows.slice(0, headerAt)) for (const cell of row) {
+    const m = /^(.+?)\s*\((\d+)\)$/.exec(String(cell || '').trim());
+    if (m) declared.set(m[1].trim(), Number(m[2]));
+  }
+  return { students, blocks: blocks.map(b => b.label), sheetName: sheet.name, declared };
+}
+function buildDpSets() {
+  if (!DP.export) throw new Error('Load the iSAMS export first.');
+  if (!DP.choices) throw new Error('Load the DP choices workbook first.');
+  const all = sheetToObjects(pickSheet(DP.export, /./, SL_COLS.export), SL_COLS.export).filter(r => r.schoolId);
+  const current = all.filter(r => !r.status || /current/i.test(r.status));
+  const cohort = current.filter(r => /^DP1/i.test(String(r.form || '').trim()));
+  const parsed = dpParseAllocation(DP.choices);
+  const keyOf = s => String(s.schoolId).trim();
+  const assignments = new Map();
+  const record = new Map();
+  const excluded = [];
+  const matched = new Set();
+  const notes = [];
+  if (!cohort.length) {
+    notes.push('No DP1 students in the export: no row has a Form beginning "DP1". Check the export covers the DP cohort.');
+  }
+  for (const row of parsed.students) {
+    const hit = matchStudentByName(row.name, cohort);
+    if (!hit.student) {
+      // Say why, since "not found" and "found but not DP1" need different fixes.
+      const elsewhere = matchStudentByName(row.name, all).student;
+      excluded.push({ name: row.name, kind: 'unmatched', sets: [], status: row.status,
+        reason: hit.how === 'ambiguous' ? 'Name matches more than one DP1 student in the export'
+          : elsewhere ? `In the export but not in DP1 — form ${elsewhere.form || 'blank'}${
+              elsewhere.status && !/current/i.test(elsewhere.status) ? `, ${elsewhere.status}` : ''}`
+            : 'No matching student in the iSAMS export' });
+      continue;
+    }
+    const key = keyOf(hit.student);
+    matched.add(key);
+    record.set(key, hit.student);
+    if (!assignments.has(key)) assignments.set(key, new Set());
+    for (const section of row.sections) assignments.get(key).add(DP_PREFIX + section);
+    if (!row.sections.length) {
+      excluded.push({ name: hit.student.fullName, student: hit.student, kind: 'noBlocks', status: row.status,
+        reason: row.status ? `No block allocation — ${row.status}` : 'No block allocation in the workbook' });
+    }
+  }
+  // Islamic comes from the export, not the choices sheet, so it stands even where the blocks
+  // do not. A or B only: N/A and blank take no Islamic set.
+  let noIslamic = 0;
+  for (const s of cohort) {
+    const key = keyOf(s);
+    if (!assignments.has(key)) { assignments.set(key, new Set()); record.set(key, s); }
+    const islamic = String(s.islamic || '').trim().toUpperCase();
+    if (islamic === 'A' || islamic === 'B') assignments.get(key).add(`${DP_PREFIX}Islamic ${islamic}`);
+    else noIslamic++;
+    if (!matched.has(key)) {
+      excluded.push({ name: s.fullName, student: s, kind: 'notInSheet', status: '',
+        reason: 'In the export as DP1 but absent from the choices workbook' });
+    }
+  }
+  const students = cohort.slice().sort((a, b) => String(a.surname).localeCompare(String(b.surname))
+    || String(a.forename).localeCompare(String(b.forename)));
+  const sets = new Map();
+  for (const [key, codes] of assignments) for (const code of codes) {
+    if (!sets.has(code)) sets.set(code, []);
+    sets.get(code).push(record.get(key));
+  }
+  for (const list of sets.values()) {
+    list.sort((a, b) => String(a.surname).localeCompare(String(b.surname)) || String(a.forename).localeCompare(String(b.forename)));
+  }
+  for (const e of excluded) if (e.student) e.sets = Array.from(assignments.get(keyOf(e.student)) || []).sort();
+  const placements = Array.from(assignments.values()).reduce((t, s) => t + s.size, 0);
+  notes.push(`Read ${parsed.students.length} rows from the ${parsed.sheetName} tab across ${parsed.blocks.length} blocks `
+    + `(${parsed.blocks.join(', ')}). ${matched.size} matched to the export's ${cohort.length} DP1 students, `
+    + `giving ${placements} placements across ${sets.size} sets. Matched on name because the workbook carries no School Id.`);
+  const byKind = k => excluded.filter(e => e.kind === k);
+  if (byKind('unmatched').length) {
+    notes.push(`${byKind('unmatched').length} student${byKind('unmatched').length === 1 ? '' : 's'} in the workbook could not be matched `
+      + `to a DP1 record and will not be exported at all: ${byKind('unmatched').map(e => e.name).join(', ')}.`);
+  }
+  if (byKind('noBlocks').length) {
+    notes.push(`${byKind('noBlocks').length} student${byKind('noBlocks').length === 1 ? ' has' : 's have'} no block allocation and will be `
+      + `exported with their Islamic set only: ${byKind('noBlocks').map(e => `${e.name} (${e.status || 'no status'})`).join(', ')}.`);
+  }
+  if (byKind('notInSheet').length) {
+    notes.push(`${byKind('notInSheet').length} DP1 student${byKind('notInSheet').length === 1 ? ' is' : 's are'} in the export but not in the `
+      + `workbook, so ${byKind('notInSheet').length === 1 ? 'it has' : 'they have'} no block sets: ${byKind('notInSheet').map(e => e.name).join(', ')}.`);
+  }
+  if (noIslamic) {
+    notes.push(`${noIslamic} DP1 student${noIslamic === 1 ? ' has' : 's have'} no A or B in the export's Islamic column and take no Islamic set.`);
+  }
+  const empty = students.filter(s => !(assignments.get(keyOf(s)) || new Set()).size);
+  if (empty.length) {
+    notes.push(`${empty.length} DP1 student${empty.length === 1 ? '' : 's'} would import with no sets at all: ${empty.map(s => s.fullName).join(', ')}.`);
+  }
+  // Section rolls from the matrix against the student table, as described in dpParseAllocation.
+  const counted = new Map();
+  for (const row of parsed.students) for (const section of row.sections) counted.set(section, (counted.get(section) || 0) + 1);
+  const short = [];
+  for (const [section, roll] of parsed.declared) {
+    const actual = counted.get(section) || 0;
+    if (actual !== roll) short.push({ section, roll, actual });
+  }
+  if (short.length) {
+    const missing = short.reduce((t, x) => t + (x.roll - x.actual), 0);
+    notes.push(`The workbook disagrees with itself: ${short.length} section${short.length === 1 ? '' : 's'} carry a different roll in the `
+      + `course matrix than in the student table below it — ${short.map(x => `${x.section} (matrix ${x.roll}, table ${x.actual})`).join(', ')}. `
+      + `${missing > 0 ? `That is ${missing} place${missing === 1 ? '' : 's'} the matrix expects but no student row claims, which usually means a `
+        + `student is missing from the table and will not be enrolled in anything. ` : ''}`
+      + `Only the student table is used here, so check the workbook before importing.`);
+  }
+  const unknown = Array.from(counted.keys()).filter(section => parsed.declared.size && !parsed.declared.has(section));
+  if (unknown.length) {
+    notes.push(`${unknown.length} section${unknown.length === 1 ? '' : 's'} appear against students but are not in the course matrix: ${unknown.join(', ')}.`);
+  }
+  return { students, assignments, sets, excluded, notes, keyOf, cohortSize: cohort.length };
+}
+function dpStatus(id, text, kind) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; el.className = `sl-status ${kind || ''}`; }
+}
+function renderDpSets() {
+  const table = document.getElementById('dpTable');
+  const stats = document.getElementById('dpStats');
+  const notes = document.getElementById('dpNotes');
+  if (!table) return;
+  const res = DP.result;
+  if (!res) {
+    table.innerHTML = '<tbody><tr><td class="allocation-empty">Load the iSAMS export and the DP choices workbook, then press <strong>Build DP sets</strong>.</td></tr></tbody>';
+    if (stats) stats.innerHTML = ''; if (notes) notes.innerHTML = '';
+    return;
+  }
+  const q = String(document.getElementById('dpSearch')?.value || '').trim().toLowerCase();
+  if (stats) {
+    stats.innerHTML = [
+      ['DP1 students', res.cohortSize, 'Current, form DP1'],
+      ['Sets', res.sets.size, 'With at least one student'],
+      ['Not fully exported', res.excluded.length, 'Missing sets, with reasons'],
+      ['Placements', Array.from(res.assignments.values()).reduce((t, s) => t + s.size, 0), 'Student-to-set rows']
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (DP.view === 'sets') {
+    const rows = Array.from(res.sets.entries())
+      .filter(([code, list]) => !q || code.toLowerCase().includes(q) || list.some(s => String(s.fullName).toLowerCase().includes(q)))
+      .sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+    table.innerHTML = `<thead><tr><th style="width:34px"></th><th>Set code</th><th>Students</th><th>Forms</th><th>Names</th></tr></thead><tbody>${
+      rows.map(([code, list]) => `<tr>
+        <td><input type="checkbox" class="dp-pick" data-code="${esc(code)}"${DP.selected.has(code) ? ' checked' : ''}></td>
+        <td class="cn-name">${esc(code)}</td>
+        <td><div class="allocation-hours">${esc(list.length)}</div></td>
+        <td>${esc(uniq(list.map(s => s.form)).sort().join(', '))}</td>
+        <td class="cn-muted">${list.slice(0, 6).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${
+          list.length > 6 ? `<span class="sl-chip warn">+${esc(list.length - 6)}</span>` : ''}</td>
+      </tr>`).join('')}</tbody>`;
+  } else if (DP.view === 'excluded') {
+    const label = { unmatched: 'Not in export', noBlocks: 'No blocks', notInSheet: 'Not in workbook' };
+    const rows = res.excluded
+      .filter(e => !q || String(e.name).toLowerCase().includes(q) || e.reason.toLowerCase().includes(q))
+      .sort((a, b) => String(a.kind).localeCompare(String(b.kind)) || String(a.name).localeCompare(String(b.name)));
+    table.innerHTML = rows.length
+      ? `<thead><tr><th>Student</th><th>Form</th><th>Problem</th><th>Why</th><th>Sets they still get</th></tr></thead><tbody>${
+        rows.map(e => `<tr>
+          <td class="allocation-teacher">${esc(e.name)}</td>
+          <td>${esc(e.student ? e.student.form : '—')}</td>
+          <td><span class="sl-chip warn">${esc(label[e.kind] || e.kind)}</span></td>
+          <td class="cn-muted">${esc(e.reason)}</td>
+          <td>${(e.sets || []).length ? (e.sets || []).map(c => `<span class="sl-chip">${esc(c)}</span>`).join('') : '<strong>none</strong>'}</td>
+        </tr>`).join('')}</tbody>`
+      : '<tbody><tr><td class="allocation-empty">Every DP1 student is fully exported.</td></tr></tbody>';
+  } else {
+    const rows = res.students.filter(s => !q || String(s.fullName).toLowerCase().includes(q) || String(s.form).toLowerCase().includes(q));
+    table.innerHTML = `<thead><tr><th>Student</th><th>Form</th><th>Islamic</th><th>Sets</th></tr></thead><tbody>${
+      rows.map(s => { const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort();
+        return `<tr><td class="allocation-teacher">${esc(s.fullName)}</td><td>${esc(s.form)}</td>
+          <td class="cn-muted">${esc(s.islamic || '—')}</td>
+          <td>${codes.length ? codes.map(c => `<span class="sl-chip">${esc(c)}</span>`).join('') : '<strong>none</strong>'}</td></tr>`; }).join('')}</tbody>`;
+  }
+  const count = document.getElementById('dpPickCount');
+  if (count) count.innerHTML = `<span><strong>${esc(DP.selected.size)}</strong> set${DP.selected.size === 1 ? '' : 's'} selected</span>`;
+  if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
+}
+function dpDownloadImport() {
+  const res = DP.result;
+  if (!res) return;
+  const max = Math.max(8, ...Array.from(res.assignments.values()).map(s => s.size));
+  const header = ['SchoolID', 'PreviousMISID', 'Surname', 'Forename'];
+  for (let i = 1; i <= max; i++) header.push(`Set Code ${i}`);
+  const rows = [header];
+  for (const s of res.students) {
+    const codes = Array.from(res.assignments.get(res.keyOf(s)) || []).sort();
+    const row = [s.schoolId, '', s.surname, s.forename];
+    for (let i = 0; i < max; i++) row.push(codes[i] || '');
+    rows.push(row);
+  }
+  downloadBlob(writeXlsx([{ name: 'DP1 Set Import', rows }]), 'isams_dp1_set_import.xlsx');
+}
+function dpExportSelected() {
+  const res = DP.result;
+  if (!res) return;
+  const codes = Array.from(DP.selected).filter(c => res.sets.has(c))
+    .sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+  if (!codes.length) { dpStatus('dpChoicesStatus', 'Tick at least one set to export.', 'bad'); return; }
+  const index = [['Set code', 'Students', 'Forms']];
+  for (const code of codes) {
+    const list = res.sets.get(code);
+    index.push([code, list.length, uniq(list.map(s => s.form)).sort().join(', ')]);
+  }
+  const sheets = [{ name: 'Index', rows: index }];
+  for (const code of codes) {
+    const rows = [['Set Code', 'School Id', 'Surname', 'Forename', 'Full Name', 'Form', 'Islamic']];
+    for (const s of res.sets.get(code)) rows.push([code, s.schoolId, s.surname, s.forename, s.fullName, s.form, s.islamic]);
+    sheets.push({ name: code, rows });
+  }
+  downloadBlob(writeXlsx(sheets), `dp1_set_lists_${codes.length}_sets.xlsx`);
+}
+async function dpLoad(which, file, statusId, check) {
+  try {
+    const parsed = await readXlsx(file);
+    check(parsed);
+    DP[which] = parsed;
+    dpStatus(statusId, `${file.name} · ${parsed.sheets.length} sheet${parsed.sheets.length === 1 ? '' : 's'}`, 'ok');
+  } catch (err) {
+    DP[which] = null;
+    dpStatus(statusId, err.message || String(err), 'bad');
+  }
+}
+document.getElementById('dpExport')?.addEventListener('change', async e => {
+  if (e.target.files[0]) await dpLoad('export', e.target.files[0], 'dpExportStatus',
+    p => sheetToObjects(pickSheet(p, /./, SL_COLS.export), SL_COLS.export));
+});
+document.getElementById('dpChoices')?.addEventListener('change', async e => {
+  if (e.target.files[0]) await dpLoad('choices', e.target.files[0], 'dpChoicesStatus', dpParseAllocation);
+});
+document.getElementById('dpBuild')?.addEventListener('click', () => {
+  try {
+    DP.result = buildDpSets();
+    dpStatus('dpChoicesStatus', `Built ${DP.result.sets.size} sets`, 'ok');
+  } catch (err) {
+    DP.result = null;
+    dpStatus('dpChoicesStatus', err.message || String(err), 'bad');
+  }
+  renderDpSets();
+});
+document.getElementById('dpExportImport')?.addEventListener('click', dpDownloadImport);
+document.getElementById('dpSheetExport')?.addEventListener('click', dpExportSelected);
+document.getElementById('dpSearch')?.addEventListener('input', renderDpSets);
+document.getElementById('dpTable')?.addEventListener('change', event => {
+  const box = event.target.closest('.dp-pick');
+  if (!box) return;
+  if (box.checked) DP.selected.add(box.dataset.code); else DP.selected.delete(box.dataset.code);
+  const count = document.getElementById('dpPickCount');
+  if (count) count.innerHTML = `<span><strong>${esc(DP.selected.size)}</strong> set${DP.selected.size === 1 ? '' : 's'} selected</span>`;
+});
+document.getElementById('dpPickShown')?.addEventListener('click', () => {
+  document.querySelectorAll('#dpTable .dp-pick').forEach(b => DP.selected.add(b.dataset.code));
+  renderDpSets();
+});
+document.getElementById('dpPickNone')?.addEventListener('click', () => { DP.selected.clear(); renderDpSets(); });
+document.querySelectorAll('.dp-tab').forEach(btn => btn.addEventListener('click', () => {
+  DP.view = btn.dataset.view;
+  document.querySelectorAll('.dp-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+  renderDpSets();
 }));
 
 // --- Minimal .xlsx writer --------------------------------------------------
