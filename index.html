@@ -356,6 +356,35 @@
     .pg-slot-in { background:#dfe5ec; text-align:center; font-size:8px; font-weight:850; color:#41505f; border-radius:2px; padding:3px 2px; }
     .pg-ftime { font-size:6.5px; color:#9a4708; font-weight:700; text-align:right; }
     .pg-foot { margin-top:4px; font-size:7px; color:#5e6b7a; line-height:1.3; }
+    /* --- CP / DP1 / DP2 programme sheets: one page per class per day ---------
+       A single DP1 slot carries up to eight parallel option groups. The compact grid
+       above folds those into one card and drops the rooms entirely to keep a week on one
+       sheet, which is precisely the detail these programmes need on paper. So this mode
+       spends a sheet per day and gives every option group its own row, at a size that
+       reads across a desk: block, group, teacher in full, and room. */
+    .dp-page { break-after:page; }
+    .dp-page:last-child { break-after:auto; }
+    .dp-head { display:flex; justify-content:space-between; align-items:flex-end; gap:14px; border-bottom:2.5px solid #14213d; padding-bottom:4px; margin:0 0 7px; }
+    .dp-title { font-size:19px; font-weight:850; letter-spacing:-.02em; line-height:1.1; }
+    .dp-dayname { color:#2f6f4f; }
+    .dp-sub { font-size:9.5px; color:#5e6b7a; text-align:right; line-height:1.4; white-space:nowrap; }
+    .dp-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .dp-table th, .dp-table td { border:1px solid #9aa6b6; padding:1.5px 6px; height:auto; vertical-align:top; }
+    .dp-colhead th { background:#14213d; color:#fff; font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; text-align:left; padding:4px 6px; }
+    .dp-pcell { background:#f6f8fb; text-align:center; vertical-align:top; }
+    .dp-pnum { font-size:15px; font-weight:850; line-height:1.15; }
+    .dp-ptime { font-size:8.5px; color:#475569; white-space:nowrap; }
+    /* The tinted edge groups the rows of one block together at a glance without costing a
+       column, and survives a mono printer as a grey bar. */
+    .dp-table td.dp-block { font-size:9.5px; line-height:1.15; color:#41505f; overflow-wrap:anywhere; border-left:4px solid hsl(var(--h,170),55%,45%); }
+    .dp-group { font-size:12px; font-weight:800; line-height:1.15; overflow-wrap:anywhere; }
+    .dp-teacher { font-size:11.5px; line-height:1.15; overflow-wrap:anywhere; }
+    .dp-room { font-size:12px; font-weight:850; line-height:1.15; overflow-wrap:anywhere; }
+    .dp-wk { text-align:center; font-size:11px; font-weight:850; }
+    .dp-none { font-size:10.5px; color:#7c8899; font-style:italic; }
+    .dp-slotrow td { background:#dfe5ec; text-align:center; font-size:11px; font-weight:850; letter-spacing:.06em; color:#41505f; }
+    .dp-foot { margin-top:5px; font-size:8.5px; color:#5e6b7a; line-height:1.35; }
+
 
     /* --- Teacher allocation report (print to PDF) --- */
     .ar-report .ar-teacher { break-inside:avoid; border:1px solid #c9d3df; border-radius:5px; padding:6px 8px; margin:0 0 6px; }
@@ -434,6 +463,12 @@
       body.printing-entities > header,
       body.printing-entities > main { display:none !important; }
       body.printing-entities .print-root { display:block !important; }
+      /* The CP/DP programme sheets list every parallel option group on its own row, so
+         they are tall and narrow rather than wide: portrait fits a whole DP1 day on one
+         sheet where landscape needs two. A browser that ignores the named page just
+         prints them landscape and the heaviest days run to a second sheet. */
+      @page dpSheet { size: A4 portrait; margin: 10mm; }
+      .dp-page { page: dpSheet; }
     }
   </style>
 </head>
@@ -506,6 +541,7 @@
         <button id="copySummary">Copy</button>
         <button class="primary" id="printCurrent" type="button">Print</button>
         <button id="togglePrintPanel" type="button" aria-expanded="false" aria-controls="printPanelWrap">Print setup</button>
+        <button id="printDpCp" type="button" data-secondary-only="true" title="One sheet per day for CP, DP1A-D and DP2 - every option group listed with its teacher and room. 30 sheets.">CP &amp; DP sheets</button>
         <button id="toggleDataPanel" type="button" aria-expanded="false" aria-controls="dataPanel">Data</button>
         <button id="toggleFocus" type="button" aria-pressed="false" title="Hide everything except the grid">Focus</button>
       </div>
@@ -2479,16 +2515,7 @@ function allocationReportHtml() {
   </section>`;
 }
 function printAllocationReport() {
-  if (!printRoot) return;
-  printRoot.innerHTML = allocationReportHtml();
-  document.body.classList.add('printing-entities');
-  const cleanup = () => {
-    document.body.classList.remove('printing-entities');
-    window.removeEventListener('afterprint', cleanup);
-  };
-  window.addEventListener('afterprint', cleanup);
-  window.print();
-  setTimeout(cleanup, 2000);
+  printPreparedRoot(allocationReportHtml());
 }
 document.getElementById('printAllocation')?.addEventListener('click', printAllocationReport);
 allocationSearch?.addEventListener('input', renderTeacherAllocations);
@@ -5195,11 +5222,11 @@ function printPageHtml(view, id) {
     ${view === 'teacher' ? teacherLoadHtml(id) : ''}
   </section>`;
 }
-function printEntities(view, ids) {
-  if (!printRoot || !ids.length) return false;
-  // A teacher run opens with one cover sheet for the whole packet.
-  const cover = view === 'teacher' ? teacherCoverHtml(ids) : '';
-  printRoot.innerHTML = cover + ids.map(id => printPageHtml(view, id)).join('');
+// Swap the whole app for one built page, print it, and put the app back. afterprint
+// does not fire in every browser when the dialog is dismissed, so a timeout backs it up.
+function printPreparedRoot(html) {
+  if (!printRoot || !html) return false;
+  printRoot.innerHTML = html;
   document.body.classList.add('printing-entities');
   const cleanup = () => {
     document.body.classList.remove('printing-entities');
@@ -5210,6 +5237,133 @@ function printEntities(view, ids) {
   setTimeout(cleanup, 2000);
   return true;
 }
+function printEntities(view, ids) {
+  if (!ids.length) return false;
+  // A teacher run opens with one cover sheet for the whole packet.
+  const cover = view === 'teacher' ? teacherCoverHtml(ids) : '';
+  return printPreparedRoot(cover + ids.map(id => printPageHtml(view, id)).join(''));
+}
+
+// --- CP / DP1 / DP2 programme sheets ----------------------------------------
+// DP and CP are option-block timetables: one slot holds up to eight parallel groups, each
+// with its own teacher and room. The compact week-per-sheet grid above cannot carry that
+// — to fit a week on one page it merges the parallel groups into a single card and drops
+// the rooms — so these programmes get their own mode: a sheet per class per day, one row
+// per option group, at a size that reads across a desk.
+const DP_CP_PROGRAMMES = ['CP', 'DP1', 'DP2'];
+// CP is the single "Careers Program 1" class, DP1 the four tutor groups DP1A–DP1D, DP2 one
+// class. Each gets its own packet even though the DP1 groups share their option blocks.
+function dpCpTargets() {
+  return (DATA.selectors.class || [])
+    .map(item => ({ item, programme: gradeLevelFromClass(item.name) }))
+    .filter(row => DP_CP_PROGRAMMES.includes(row.programme))
+    .sort((a, b) => DP_CP_PROGRAMMES.indexOf(a.programme) - DP_CP_PROGRAMMES.indexOf(b.programme)
+      || naturalKey(a.item.name).localeCompare(naturalKey(b.item.name), undefined, { numeric:true }))
+    .map(row => row.item);
+}
+// The aSc subject on a DP or CP card is only the block container — "DP1 Block A",
+// "Group 5", "BTEC" — and the lesson itself is the group held against this class. Both
+// print. A handful of DP/CP cards (ToK, Core, MOE Arabic) carry no group at all; there the
+// container subject already is the lesson name, so it moves into the subject column rather
+// than printing a row whose subject is blank.
+function dpCpLessonRow(ev, classId) {
+  const groups = uniq((ev.groupByClass || [])
+    .filter(g => g.classId === classId || !g.classId)
+    .map(g => g.name)).filter(g => g && g !== 'Entire class');
+  const block = textClean(ev.subject || ev.subjectShort || '');
+  const group = groups.join(' / ');
+  return {
+    block: group ? block : '',
+    group: group || block || 'Lesson',
+    teachers: ev.teachers.join(', '),
+    rooms: ev.rooms.join(', '),
+    week: ev.weekShort === 'A' || ev.weekShort === 'B' ? ev.weekShort : '',
+    hue: ev.subjectHue
+  };
+}
+function dpCpCellsHtml(row) {
+  return `<td class="dp-block" style="--h:${esc(row.hue)}">${row.block ? esc(row.block) : '&mdash;'}</td>`
+    + `<td class="dp-group">${esc(row.group)}</td>`
+    + `<td class="dp-teacher">${row.teachers ? esc(row.teachers) : '<span class="dp-none">No teacher set</span>'}</td>`
+    + `<td class="dp-room">${row.rooms ? esc(row.rooms) : '<span class="dp-none">No room set</span>'}</td>`
+    + `<td class="dp-wk">${row.week ? esc(row.week) : '&middot;'}</td>`;
+}
+function dpCpDayPageHtml(opt, day) {
+  const bySlot = new Map();
+  for (const ev of DATA.events) {
+    if (ev.dayKey !== day.key || !ev.classIds.includes(opt.id) || !includesWeek(ev)) continue;
+    const key = String(ev.period);
+    if (!bySlot.has(key)) bySlot.set(key, []);
+    bySlot.get(key).push(ev);
+  }
+  // Friday is a shortened day with its own bell times and no mentor; Monday–Thursday carry
+  // the Mentor/Break/Lunch slots between periods.
+  const friday = day.key === FRIDAY_KEY ? (FRIDAY_SCHEDULE[activeSourceKey] || []) : [];
+  const rows = friday.length
+    ? friday.map(r => r.type === 'period'
+      ? { kind:'period', period:r.ascPeriod, time:r.time }
+      : { kind:'slot', label:r.label, time:r.time })
+    : DATA.periods.flatMap(p => [
+      { kind:'period', period:p.period, time:`${p.starttime}–${p.endtime}` },
+      ...(activeSourceKey === 'secondary' ? (SECONDARY_INTERSTITIALS[p.period] || []) : [])
+        .map(s => ({ kind:'slot', label:s.label, time:s.monThu }))
+    ]);
+
+  let body = '';
+  for (const row of rows) {
+    if (row.kind === 'slot') {
+      body += `<tr class="dp-slotrow"><td class="dp-pcell"><div class="dp-ptime">${esc(row.time)}</div></td>`
+        + `<td colspan="5">${esc(row.label)}</td></tr>`;
+      continue;
+    }
+    // A lesson that runs every week often arrives as two cards, one per week, identical in
+    // every other respect. Two rows for that reads as two different lessons, so collapse a
+    // pair seen in both weeks back into one row that simply runs every week.
+    const lessons = [];
+    const byKey = new Map();
+    for (const ev of (bySlot.get(String(row.period)) || [])) {
+      const lesson = dpCpLessonRow(ev, opt.id);
+      const key = `${lesson.block}|${lesson.group}|${lesson.teachers}|${lesson.rooms}`;
+      const seen = byKey.get(key);
+      if (!seen) { byKey.set(key, lesson); lessons.push(lesson); continue; }
+      if (seen.week !== lesson.week) seen.week = '';
+    }
+    lessons.sort((a, b) => naturalKey(`${a.block} ${a.group}`).localeCompare(naturalKey(`${b.block} ${b.group}`), undefined, { numeric:true }));
+    const periodCell = `<td class="dp-pcell"${lessons.length > 1 ? ` rowspan="${lessons.length}"` : ''}>`
+      + `<div class="dp-pnum">P${esc(row.period)}</div><div class="dp-ptime">${esc(row.time)}</div></td>`;
+    if (!lessons.length) {
+      body += `<tr>${periodCell}<td colspan="5" class="dp-none">No lesson</td></tr>`;
+      continue;
+    }
+    body += `<tr>${periodCell}${dpCpCellsHtml(lessons[0])}</tr>`;
+    for (let i = 1; i < lessons.length; i++) body += `<tr>${dpCpCellsHtml(lessons[i])}</tr>`;
+  }
+
+  const weekText = state.week === 'all' ? 'Weeks A and B' : `Week ${state.week}`;
+  const notes = ['<strong>Wk</strong> is A or B for a lesson that runs in that week only; &middot; runs every week.'];
+  if (friday.length) notes.push('Friday runs its own shortened bell times, printed against each period.');
+  return `<section class="dp-page">
+    <div class="dp-head">
+      <div class="dp-title">${esc(opt.name)} <span class="dp-dayname">&middot; ${esc(day.name)}</span></div>
+      <div class="dp-sub">${esc(DATA.meta.title || sourceConfig().title)}<br>${esc(sourceConfig().label)} &middot; ${esc(gradeLevelFromClass(opt.name))} &middot; ${esc(weekText)}</div>
+    </div>
+    <table class="dp-table">
+      <colgroup><col style="width:74px"><col style="width:128px"><col><col style="width:168px"><col style="width:132px"><col style="width:32px"></colgroup>
+      <thead><tr class="dp-colhead"><th>Period</th><th>Block</th><th>Subject / group</th><th>Teacher</th><th>Room</th><th>Wk</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="dp-foot">${notes.join(' ')}</div>
+  </section>`;
+}
+document.getElementById('printDpCp')?.addEventListener('click', () => {
+  const targets = dpCpTargets();
+  if (!targets.length) {
+    setXmlStatus('No CP, DP1 or DP2 class in the loaded timetable, so there is nothing to print. These sheets come from the Secondary source.', true);
+    return;
+  }
+  printPreparedRoot(targets.flatMap(opt => DATA.days.map(day => dpCpDayPageHtml(opt, day))).join(''));
+});
+
 printType?.addEventListener('change', renderPrintList);
 printSearch?.addEventListener('input', renderPrintList);
 printList?.addEventListener('change', event => {
