@@ -840,8 +840,10 @@
         Toddle's import template, one sheet per subject. Load the template you downloaded from
         Toddle &mdash; its <em>Hiddentimetable</em> tab supplies the class list and ids, and the
         <em>Staff cheat sheet</em> supplies teacher emails, so the export only ever names classes
-        and staff Toddle already knows. Two workbooks come out, one per week: each is a complete
-        week, holding every all-week lesson plus that week's own.</p>
+        and staff Toddle already knows. Three workbooks come out &mdash; <strong>Regular</strong>
+        for classes that run the same every week, then <strong>Week A</strong> and
+        <strong>Week B</strong> for the ones that alternate. A fourth holds any class Toddle does
+        not have, so its real name can be written in by hand.</p>
       <div class="sl-files">
         <div>
           <label for="tdTemplate">Toddle template <span class="cn-muted">(required)</span></label>
@@ -852,8 +854,10 @@
           <label>Build</label>
           <div class="button-row">
             <button id="tdBuild" class="primary" type="button">Check against template</button>
-            <button id="tdWeekA" type="button">Week A workbook</button>
-            <button id="tdWeekB" type="button">Week B workbook</button>
+            <button id="tdRegular" type="button">Regular</button>
+            <button id="tdWeekA" type="button">Week A</button>
+            <button id="tdWeekB" type="button">Week B</button>
+            <button id="tdOrphans" type="button">Not in Toddle</button>
           </div>
         </div>
       </div>
@@ -4271,8 +4275,18 @@ document.querySelectorAll('.dp-tab').forEach(btn => btn.addEventListener('click'
 // holds. The template carries both lists on its hidden tabs, so they are treated as the
 // authority: a class or teacher Toddle does not know is reported rather than invented, which
 // is what stops the import creating duplicate classes.
-const TD = { template: null, result: null, view: 'subjects' };
+const TD = { template: null, result: null, view: 'subjects', staff: new Map() };
 const TD_DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+// Confirmed staff matches are a judgement the user has made about two spellings of one
+// person, so they outlive a reload even though the template has to be loaded again.
+const TD_STAFF_KEY = 'ristt.toddle.staff.v1';
+function tdSaveStaff() {
+  try { localStorage.setItem(TD_STAFF_KEY, JSON.stringify(Array.from(TD.staff))); } catch (err) { /* private mode */ }
+}
+function tdRestoreStaff() {
+  try { TD.staff = new Map(JSON.parse(localStorage.getItem(TD_STAFF_KEY)) || []); } catch (err) { TD.staff = new Map(); }
+}
+tdRestoreStaff();
 function tdParseTemplate(parsed) {
   const pick = re => (parsed.sheets || []).find(s => re.test(String(s.name || '').trim()));
   const hidden = pick(/^hidden\s*timetable$/i);
@@ -4335,18 +4349,17 @@ function buildToddleExport() {
   for (const r of named.rows) for (const id of r.lessonIds) byLesson.set(id, r);
   const emailFor = tdEmailLookup(tpl.people);
   const rows = [];
+  const orphanRows = [];                       // classes Toddle does not hold, kept for their own file
   const unknownClasses = new Map();
   const unknownPeriods = new Map();
-  const missingStaff = new Map();
+  const staffNeeds = new Map();                // teacher -> { rows, candidates, confirmed }
   const notes = [];
+  const sortRows = list => list.sort((a, b) => TD_DAY_ORDER.indexOf(a.day) - TD_DAY_ORDER.indexOf(b.day)
+    || naturalKey(a.period).localeCompare(naturalKey(b.period))
+    || naturalKey(a.cells[1]).localeCompare(naturalKey(b.cells[1])));
   for (const ev of DATA.events) {
     const cls = byLesson.get(ev.lessonId);
     if (!cls) continue;                        // DP, CP and meetings carry no MYP class name
-    const classId = tpl.classes.get(cls.name);
-    if (classId === undefined) {
-      unknownClasses.set(cls.name, (unknownClasses.get(cls.name) || 0) + 1);
-      continue;
-    }
     if (tpl.periods.size && !tpl.periods.has(String(ev.period))) {
       unknownPeriods.set(String(ev.period), (unknownPeriods.get(String(ev.period)) || 0) + 1);
       continue;
@@ -4354,40 +4367,58 @@ function buildToddleExport() {
     const emails = [];
     for (const teacher of ev.teachers) {
       const person = emailFor(teacher);
-      if (person) emails.push(person.email);
-      else missingStaff.set(teacher, (missingStaff.get(teacher) || 0) + 1);
+      if (person) { emails.push(person.email); continue; }
+      // No automatic match. A confirmed spelling stands in; otherwise the cell stays blank
+      // and the teacher is listed for confirmation.
+      const confirmed = TD.staff.get(teacher) || '';
+      if (confirmed) emails.push(confirmed);
+      if (!staffNeeds.has(teacher)) {
+        staffNeeds.set(teacher, { rows: 0, candidates: tdStaffCandidates(teacher, tpl.people), confirmed });
+      }
+      staffNeeds.get(teacher).rows++;
+      staffNeeds.get(teacher).confirmed = confirmed;
     }
     const [start, end] = String(ev.time || '').split(/[–—-]/).map(s => s.trim());
-    rows.push({
+    const classId = tpl.classes.get(cls.name);
+    const known = classId !== undefined;
+    const entry = {
       week: ev.weekShort || 'All',
       subject: tdSubjectLabel(ev.subject),
       day: ev.day,
       period: String(ev.period),
-      cells: [classId, cls.name, String(ev.period), ev.day, emails.join(', '),
-              uniq(ev.rooms).join(", "), tdSubjectLabel(ev.subject), start || '', end || '']
-    });
+      cells: [known ? classId : '', cls.name, String(ev.period), ev.day, emails.join(', '),
+              uniq(ev.rooms).join(', '), tdSubjectLabel(ev.subject), start || '', end || '']
+    };
+    if (known) rows.push(entry);
+    else {
+      orphanRows.push(entry);
+      unknownClasses.set(cls.name, (unknownClasses.get(cls.name) || 0) + 1);
+    }
   }
-  rows.sort((a, b) => TD_DAY_ORDER.indexOf(a.day) - TD_DAY_ORDER.indexOf(b.day)
-    || naturalKey(a.period).localeCompare(naturalKey(b.period))
-    || naturalKey(a.cells[1]).localeCompare(naturalKey(b.cells[1])));
+  sortRows(rows);
+  sortRows(orphanRows);
   const weekTally = { All: 0, A: 0, B: 0 };
   for (const r of rows) weekTally[r.week] = (weekTally[r.week] || 0) + 1;
   notes.push(`${rows.length} rows built from ${named.rows.length} MYP classes, against the template's `
-    + `${tpl.classes.size} classes and ${tpl.people.length} staff. Week A workbook gets ${weekTally.All + weekTally.A} rows, `
-    + `Week B ${weekTally.All + weekTally.B}: ${weekTally.All} run every week, ${weekTally.A} in Week A only, ${weekTally.B} in Week B only.`);
+    + `${tpl.classes.size} classes and ${tpl.people.length} staff. Three workbooks: Regular ${weekTally.All} rows `
+    + `(classes that run every week), Week A ${weekTally.A}, Week B ${weekTally.B}.`);
   if (unknownClasses.size) {
     const dropped = Array.from(unknownClasses.values()).reduce((a, b) => a + b, 0);
     notes.push(`${unknownClasses.size} class${unknownClasses.size === 1 ? '' : 'es'} in the timetable ${
-      unknownClasses.size === 1 ? 'is' : 'are'} not in the Toddle template, so ${dropped} row${dropped === 1 ? '' : 's'} `
-      + `${dropped === 1 ? 'was' : 'were'} left out. Either rename them in Toddle or in aSc — see the "Not in Toddle" tab.`);
+      unknownClasses.size === 1 ? 'is' : 'are'} not in the Toddle template. Their ${dropped} row${dropped === 1 ? '' : 's'} `
+      + `${dropped === 1 ? 'is' : 'are'} kept out of the three workbooks and put in the "Not in Toddle" one instead, `
+      + `where the class names can be corrected by hand before uploading.`);
   }
   if (unknownPeriods.size) {
     notes.push(`Periods the template does not offer, so their rows were left out: `
       + Array.from(unknownPeriods.entries()).map(([p, n]) => `P${p} (${n} rows)`).join(', ') + '.');
   }
-  if (missingStaff.size) {
-    notes.push(`${missingStaff.size} teacher${missingStaff.size === 1 ? '' : 's'} could not be matched to a Toddle staff email and `
-      + `${missingStaff.size === 1 ? 'was' : 'were'} left blank on their rows — see the "Staff without email" tab.`);
+  const unconfirmed = Array.from(staffNeeds.values()).filter(s => !s.confirmed).length;
+  const confirmedCount = staffNeeds.size - unconfirmed;
+  if (staffNeeds.size) {
+    notes.push(`${staffNeeds.size} teacher${staffNeeds.size === 1 ? '' : 's'} did not match a Toddle staff email automatically. `
+      + `${confirmedCount} ${confirmedCount === 1 ? 'has been' : 'have been'} confirmed by hand and ${confirmedCount === 1 ? 'carries' : 'carry'} an email; `
+      + `${unconfirmed} still ${unconfirmed === 1 ? 'goes' : 'go'} out blank — confirm them on the "Staff without email" tab.`);
   }
   // Mentor, Break and Lunch are drawn from the bell schedule, not from aSc lessons, so there
   // is nothing to export for them: aSc records no tutor against a homeroom.
@@ -4399,33 +4430,85 @@ function buildToddleExport() {
       + `(P1 is 30 minutes, and P2 onwards shift). A fixed 60-minute routine in Toddle will place them wrongly unless it reads `
       + `the Start and End time columns, which this export fills.`);
   }
-  return { rows, tpl, unknownClasses, unknownPeriods, missingStaff, notes, weekTally };
+  return { rows, orphanRows, tpl, unknownClasses, unknownPeriods, staffNeeds, notes, weekTally };
 }
-function tdWorkbookFor(week) {
-  const res = TD.result;
-  if (!res) return null;
-  const wanted = res.rows.filter(r => r.week === 'All' || r.week === week);
+// Toddle spells some staff differently from aSc, so offer anyone sharing a name part and let
+// the user confirm which is the same person.
+function tdStaffCandidates(name, people) {
+  const parts = String(name || '').trim().split(/\s+/).filter(w => w.length > 2);
+  const seen = new Set();
+  const out = [];
+  for (const person of people) {
+    const hay = person.name.toLowerCase();
+    const hit = parts.some(w => {
+      const stem = w.toLowerCase().slice(0, Math.max(4, w.length - 2));
+      return hay.includes(stem);
+    });
+    if (hit && !seen.has(person.email)) { seen.add(person.email); out.push(person); }
+  }
+  return out.slice(0, 6);
+}
+// Sheets are built to the template's own shape: the instruction row, then the header, then
+// data from row 3, which is where the template's dropdowns start.
+function tdSheetsFrom(entries, tpl) {
   const bySubject = new Map();
-  for (const r of wanted) {
+  for (const r of entries) {
     if (!bySubject.has(r.subject)) bySubject.set(r.subject, []);
     bySubject.get(r.subject).push(r.cells);
   }
-  const sheets = [];
-  for (const subject of Array.from(bySubject.keys()).sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)))) {
-    // Rebuilt to the template's own shape: the instruction row, then the header, then data
-    // from row 3, which is where the template's dropdowns start.
-    const body = [];
-    if (res.tpl.intro) body.push(res.tpl.intro);
-    body.push(res.tpl.header);
-    body.push(...bySubject.get(subject));
-    sheets.push({ name: subject, rows: body });
-  }
+  return Array.from(bySubject.keys())
+    .sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)))
+    .map(subject => {
+      const body = [];
+      if (tpl.intro) body.push(tpl.intro);
+      body.push(tpl.header);
+      body.push(...bySubject.get(subject));
+      return { name: subject, rows: body };
+    });
+}
+// "Regular" is every class that runs the same in both weeks; Week A and Week B carry only the
+// lessons confined to that week, so the three files together are the whole timetable once.
+function tdWorkbookFor(scope) {
+  const res = TD.result;
+  if (!res) return null;
+  const want = scope === 'Regular' ? 'All' : scope;
+  const sheets = tdSheetsFrom(res.rows.filter(r => r.week === want), res.tpl);
   return sheets.length ? writeXlsx(sheets) : null;
 }
-function tdDownloadWeek(week) {
-  const blob = tdWorkbookFor(week);
-  if (!blob) { tdStatus('tdTemplateStatus', 'Press "Check against template" first.', 'bad'); return; }
-  downloadBlob(blob, `toddle_myp_week_${week}.xlsx`);
+function tdDownloadScope(scope) {
+  const blob = tdWorkbookFor(scope);
+  if (!blob) {
+    tdStatus('tdTemplateStatus', TD.result ? `No rows for ${scope}.` : 'Press "Check against template" first.', 'bad');
+    return;
+  }
+  downloadBlob(blob, `toddle_myp_${scope.toLowerCase().replace(/\s+/g, '_')}.xlsx`);
+}
+// The classes Toddle does not hold, in the same format but with Class id left empty. The
+// first sheet is a worklist for writing the real names against, since that is the manual step
+// these rows are waiting on.
+function tdDownloadOrphans() {
+  const res = TD.result;
+  if (!res) { tdStatus('tdTemplateStatus', 'Press "Check against template" first.', 'bad'); return; }
+  if (!res.orphanRows.length) { tdStatus('tdTemplateStatus', 'Every class is already in Toddle.', 'ok'); return; }
+  const worklist = [['Class name in the timetable', 'Rows', 'Runs', 'Subject', 'Suggested Toddle names', 'Real class name in Toddle']];
+  const byName = new Map();
+  for (const r of res.orphanRows) {
+    if (!byName.has(r.cells[1])) byName.set(r.cells[1], { rows: 0, weeks: new Set(), subject: r.subject });
+    byName.get(r.cells[1]).rows++;
+    byName.get(r.cells[1]).weeks.add(r.week);
+  }
+  for (const [name, info] of Array.from(byName.entries()).sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])))) {
+    const stem = name.split('.').slice(0, 2).join('.');
+    const near = Array.from(res.tpl.classes.keys())
+      .filter(c => c !== name && (c.startsWith(stem) || (c.includes('.') && stem.startsWith(c.split('.').slice(0, 2).join('.')))))
+      .slice(0, 4);
+    const weeks = Array.from(info.weeks).sort();
+    worklist.push([name, info.rows,
+      weeks.length === 1 && weeks[0] === 'All' ? 'Every week' : weeks.map(w => w === 'All' ? 'Every week' : `Week ${w}`).join(' + '),
+      info.subject, near.join(', '), '']);
+  }
+  const sheets = [{ name: 'Names to fix', rows: worklist }, ...tdSheetsFrom(res.orphanRows, res.tpl)];
+  downloadBlob(writeXlsx(sheets), 'toddle_myp_not_in_toddle.xlsx');
 }
 function tdStatus(id, text, kind) {
   const el = document.getElementById(id);
@@ -4443,11 +4526,12 @@ function renderToddle() {
     return;
   }
   if (stats) {
+    const blank = Array.from(res.staffNeeds.values()).filter(s => !s.confirmed).length;
     stats.innerHTML = [
-      ['Rows', res.rows.length, 'One per class, period and day'],
-      ['Week A / Week B', `${res.weekTally.All + res.weekTally.A} / ${res.weekTally.All + res.weekTally.B}`, 'Rows per workbook'],
-      ['Not in Toddle', res.unknownClasses.size, 'Classes left out'],
-      ['Staff without email', res.missingStaff.size, 'Left blank on their rows']
+      ['Regular', res.weekTally.All, 'Rows that run every week'],
+      ['Week A / Week B', `${res.weekTally.A} / ${res.weekTally.B}`, 'Rows confined to one week'],
+      ['Not in Toddle', res.unknownClasses.size, `${res.orphanRows.length} rows in their own file`],
+      ['Staff still blank', blank, `${res.staffNeeds.size - blank} confirmed by hand`]
     ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
   }
   if (TD.view === 'subjects') {
@@ -4459,13 +4543,12 @@ function renderToddle() {
       s.classes.add(r.cells[1]);
     }
     const list = Array.from(bySubject.entries()).sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
-    table.innerHTML = `<thead><tr><th>Sheet (subject)</th><th>Classes</th><th>Every week</th><th>Week A only</th><th>Week B only</th><th>Week A sheet</th><th>Week B sheet</th></tr></thead><tbody>${
+    table.innerHTML = `<thead><tr><th>Sheet (subject)</th><th>Classes</th><th>Regular</th><th>Week A</th><th>Week B</th></tr></thead><tbody>${
       list.map(([subject, s]) => `<tr>
         <td class="cn-name">${esc(subject)}</td>
         <td>${esc(s.classes.size)}</td>
-        <td>${esc(s.all)}</td><td>${esc(s.A)}</td><td>${esc(s.B)}</td>
-        <td><div class="allocation-hours">${esc(s.all + s.A)}</div></td>
-        <td><div class="allocation-hours">${esc(s.all + s.B)}</div></td>
+        <td><div class="allocation-hours">${esc(s.all)}</div></td>
+        <td>${esc(s.A)}</td><td>${esc(s.B)}</td>
       </tr>`).join('')}</tbody>`;
   } else if (TD.view === 'unknown') {
     const list = Array.from(res.unknownClasses.entries()).sort((a, b) => b[1] - a[1] || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
@@ -4483,15 +4566,21 @@ function renderToddle() {
         }).join('')}</tbody>`
       : '<tbody><tr><td class="allocation-empty">Every class in the timetable exists in Toddle.</td></tr></tbody>';
   } else {
-    const list = Array.from(res.missingStaff.entries()).sort((a, b) => b[1] - a[1]);
+    // Unconfirmed first, since those are the ones still going out blank. Confirmed rows stay
+    // on the list so a wrong call can be taken back.
+    const list = Array.from(res.staffNeeds.entries())
+      .sort((a, b) => (a[1].confirmed ? 1 : 0) - (b[1].confirmed ? 1 : 0) || b[1].rows - a[1].rows);
     table.innerHTML = list.length
-      ? `<thead><tr><th>Teacher in the timetable</th><th>Rows affected</th><th>Similar names in Toddle</th></tr></thead><tbody>${
-        list.map(([name, n]) => {
-          const last = String(name).trim().split(/\s+/).pop().toLowerCase().slice(0, 5);
-          const near = res.tpl.people.filter(p => p.name.toLowerCase().includes(last)).slice(0, 3);
-          return `<tr><td class="allocation-teacher">${esc(name)}</td><td>${esc(n)}</td>
-            <td class="cn-muted">${near.length ? near.map(p => `<span class="sl-chip">${esc(p.name)} · ${esc(p.email)}</span>`).join('') : 'nothing similar'}</td></tr>`;
-        }).join('')}</tbody>`
+      ? `<thead><tr><th>Teacher in the timetable</th><th>Rows</th><th>Same person in Toddle?</th><th>Email used</th></tr></thead><tbody>${
+        list.map(([name, info]) => `<tr${info.confirmed ? '' : ' class="sl-big"'}>
+          <td class="allocation-teacher">${esc(name)}</td>
+          <td>${esc(info.rows)}</td>
+          <td>${info.candidates.length
+            ? `<select class="td-confirm" data-teacher="${esc(name)}"><option value="">&mdash; not confirmed &mdash;</option>${
+                info.candidates.map(p => `<option value="${esc(p.email)}"${p.email === info.confirmed ? ' selected' : ''}>${esc(p.name)} · ${esc(p.email)}</option>`).join('')}</select>`
+            : '<span class="cn-muted">nobody similar in Toddle</span>'}</td>
+          <td>${info.confirmed ? `<span class="sl-chip">${esc(info.confirmed)}</span>` : '<span class="cn-muted">blank</span>'}</td>
+        </tr>`).join('')}</tbody>`
       : '<tbody><tr><td class="allocation-empty">Every teacher matched a Toddle staff email.</td></tr></tbody>';
   }
   if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
@@ -4519,8 +4608,18 @@ document.getElementById('tdBuild')?.addEventListener('click', () => {
   }
   renderToddle();
 });
-document.getElementById('tdWeekA')?.addEventListener('click', () => tdDownloadWeek('A'));
-document.getElementById('tdWeekB')?.addEventListener('click', () => tdDownloadWeek('B'));
+document.getElementById('tdRegular')?.addEventListener('click', () => tdDownloadScope('Regular'));
+document.getElementById('tdWeekA')?.addEventListener('click', () => tdDownloadScope('A'));
+document.getElementById('tdWeekB')?.addEventListener('click', () => tdDownloadScope('B'));
+document.getElementById('tdOrphans')?.addEventListener('click', tdDownloadOrphans);
+document.getElementById('tdTable')?.addEventListener('change', event => {
+  const sel = event.target.closest('.td-confirm');
+  if (!sel) return;
+  if (sel.value) TD.staff.set(sel.dataset.teacher, sel.value); else TD.staff.delete(sel.dataset.teacher);
+  tdSaveStaff();
+  TD.result = buildToddleExport();   // rebuild so the confirmed email lands on their rows
+  renderToddle();
+});
 document.querySelectorAll('.td-tab').forEach(btn => btn.addEventListener('click', () => {
   TD.view = btn.dataset.view;
   document.querySelectorAll('.td-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
