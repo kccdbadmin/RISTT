@@ -837,8 +837,8 @@
     <div class="allocation-panel">
       <h2>Toddle export</h2>
       <p><strong>Secondary source.</strong> Writes the timetable into Toddle's import template.
-        Pick the programme: MYP gives a sheet per subject, DP1 a sheet per block, DP2 a sheet
-        per IB group. Load the template you downloaded from
+        Pick the programme: MYP gives a sheet per subject, DP1 and DP2 a sheet per block.
+        Load the template you downloaded from
         Toddle &mdash; its <em>Hiddentimetable</em> tab supplies the class list and ids, and the
         <em>Staff cheat sheet</em> supplies teacher emails, so the export only ever names classes
         and staff Toddle already knows. Three workbooks come out &mdash; <strong>Regular</strong>
@@ -856,7 +856,7 @@
           <select id="tdScope">
             <option value="MYP">MYP &mdash; sheets per subject</option>
             <option value="DP1">DP1 &mdash; sheets per block</option>
-            <option value="DP2">DP2 &mdash; sheets per IB group</option>
+            <option value="DP2">DP2 &mdash; sheets per block</option>
           </select>
           <div class="sl-status" id="tdScopeStatus">Outputs cover the chosen programme only</div>
         </div>
@@ -4353,7 +4353,7 @@ function tdSubjectLabel(subject) {
 // Where a lesson belongs and what aSc calls it. MYP names come from the class-name generator;
 // DP has none, so the aSc group is the name — for DP1 the group carries the section and the
 // subject the block ("B3 Maths AA HL.1" in "DP1 Block C"), for DP2 the group names the class
-// outright. Sheets are per subject for MYP, per block for DP1 and per IB group for DP2.
+// outright. Sheets are per subject for MYP and per block for both DP years.
 function tdTarget(ev, byLesson) {
   const subject = String(ev.subject || '').trim();
   const groups = uniq(ev.groups).filter(g => g && !/^entire class$/i.test(g));
@@ -4365,9 +4365,13 @@ function tdTarget(ev, byLesson) {
     return { scope: 'DP1', sheet: `Block ${letter}`,
              label: `DP1 - ${groups[0].replace(/^B\d+\.?\s*/, '').trim()} - Block ${letter}` };
   }
-  const group = /^Group\s*(\d)/i.exec(subject);
-  if (group && dp2 && groups.length) {
-    return { scope: 'DP2', sheet: `Group ${group[1]}`, label: `${groups[0].trim()} DP2` };
+  // DP2's blocks are called "Group 1"..."Group 6" in aSc, which are block labels and not IB
+  // subject groups. The IB group lives in the group name's own G-prefix, which is what
+  // Toddle's DP2 names use, so the two must not be conflated: a class can sit in block 2 and
+  // still be an IB group 5 subject.
+  const dp2Block = /^Group\s*(\d)\s*(HL)?$/i.exec(subject);
+  if (dp2Block && dp2 && groups.length) {
+    return { scope: 'DP2', sheet: `Block ${dp2Block[1]}${dp2Block[2] ? ' HL' : ''}`, label: `${groups[0].trim()} DP2` };
   }
   if (dp1 || dp2) {
     const scope = dp2 ? 'DP2' : 'DP1';
@@ -4401,10 +4405,12 @@ function tdPool(target, tpl) {
   if (target.scope === 'DP1' && /^Block [A-F]$/.test(target.sheet)) {
     return { pool: all.filter(name => name.endsWith(` - ${target.sheet}`)), partitioned: true };
   }
-  if (target.scope === 'DP2' && /^Group \d$/.test(target.sheet)) {
-    const n = target.sheet.slice(6);
-    // A section shared between two IB groups is written "G3+4.", so read the leading numbers
-    // as a list rather than a single digit.
+  // Toddle groups DP2 by IB subject group, which is the G-prefix on the aSc group name — not
+  // the block the lesson sits in. A section shared between two IB groups is written "G3+4.",
+  // so read the leading numbers as a list rather than a single digit.
+  const ibGroup = target.scope === 'DP2' && /^G\s*(\d)/i.exec(target.label);
+  if (ibGroup) {
+    const n = ibGroup[1];
     return { pool: all.filter(name => {
       const head = /^G([\d+]+)\./.exec(name);
       return head && head[1].split('+').includes(n) && /DP2$/.test(name);
@@ -4629,8 +4635,14 @@ function tdDownloadOrphans() {
 function tdNearby(name, scope, sheet, tpl) {
   const all = Array.from(tpl.classes.keys());
   if (scope === 'DP1' && /^Block [A-F]$/.test(sheet)) return all.filter(c => c.endsWith(` - ${sheet}`)).slice(0, 8);
-  if (scope === 'DP2' && /^Group \d$/.test(sheet)) {
-    return all.filter(c => new RegExp(`^G(\\d\\+)?${sheet.slice(6)}[.+]`).test(c) && /DP2$/.test(c)).slice(0, 8);
+  if (scope === 'DP2') {
+    const ib = /^G\s*(\d)/i.exec(name);
+    if (ib) {
+      return all.filter(c => {
+        const head = /^G([\d+]+)\./.exec(c);
+        return head && head[1].split('+').includes(ib[1]) && /DP2$/.test(c);
+      }).slice(0, 8);
+    }
   }
   if (scope !== 'MYP') return all.filter(c => c.includes(scope) && c !== name).slice(0, 6);
   const stem = name.split('.').slice(0, 2).join('.');
