@@ -836,8 +836,9 @@
   <section id="toddleSection" class="page-section" aria-label="Toddle export">
     <div class="allocation-panel">
       <h2>Toddle export</h2>
-      <p><strong>MYP Grades 6&ndash;10, Secondary source.</strong> Writes the timetable into
-        Toddle's import template, one sheet per subject. Load the template you downloaded from
+      <p><strong>Secondary source.</strong> Writes the timetable into Toddle's import template.
+        Pick the programme: MYP gives a sheet per subject, DP1 a sheet per block, DP2 a sheet
+        per IB group. Load the template you downloaded from
         Toddle &mdash; its <em>Hiddentimetable</em> tab supplies the class list and ids, and the
         <em>Staff cheat sheet</em> supplies teacher emails, so the export only ever names classes
         and staff Toddle already knows. Three workbooks come out &mdash; <strong>Regular</strong>
@@ -849,6 +850,15 @@
           <label for="tdTemplate">Toddle template <span class="cn-muted">(required)</span></label>
           <input type="file" id="tdTemplate" accept=".xlsx">
           <div class="sl-status" id="tdTemplateStatus">Not loaded</div>
+        </div>
+        <div>
+          <label for="tdScope">Programme</label>
+          <select id="tdScope">
+            <option value="MYP">MYP &mdash; sheets per subject</option>
+            <option value="DP1">DP1 &mdash; sheets per block</option>
+            <option value="DP2">DP2 &mdash; sheets per IB group</option>
+          </select>
+          <div class="sl-status" id="tdScopeStatus">Outputs cover the chosen programme only</div>
         </div>
         <div>
           <label>Build</label>
@@ -4340,6 +4350,86 @@ function tdSubjectLabel(subject) {
   const raw = String(subject || '').trim();
   return cnIsElectiveBlock(raw) ? raw : cnTidySubject(raw);
 }
+// Where a lesson belongs and what aSc calls it. MYP names come from the class-name generator;
+// DP has none, so the aSc group is the name — for DP1 the group carries the section and the
+// subject the block ("B3 Maths AA HL.1" in "DP1 Block C"), for DP2 the group names the class
+// outright. Sheets are per subject for MYP, per block for DP1 and per IB group for DP2.
+function tdTarget(ev, byLesson) {
+  const subject = String(ev.subject || '').trim();
+  const groups = uniq(ev.groups).filter(g => g && !/^entire class$/i.test(g));
+  const dp2 = ev.classes.some(c => /^DP2/i.test(c));
+  const dp1 = ev.classes.some(c => /^DP1/i.test(c));
+  const block = /^DP1 Block ([A-F])$/i.exec(subject);
+  if (block && groups.length) {
+    const letter = block[1].toUpperCase();
+    return { scope: 'DP1', sheet: `Block ${letter}`,
+             label: `DP1 - ${groups[0].replace(/^B\d+\.?\s*/, '').trim()} - Block ${letter}` };
+  }
+  const group = /^Group\s*(\d)/i.exec(subject);
+  if (group && dp2 && groups.length) {
+    return { scope: 'DP2', sheet: `Group ${group[1]}`, label: `${groups[0].trim()} DP2` };
+  }
+  if (dp1 || dp2) {
+    const scope = dp2 ? 'DP2' : 'DP1';
+    // Islamic and TOK are named per programme in Toddle; everything else keeps its subject.
+    if (/^DP Islamic$/i.test(subject) && groups.length) {
+      return { scope, sheet: 'Islamic', label: `${scope} - ${groups[0].trim()}` };
+    }
+    if (/^Theory of Knowledge$/i.test(subject)) {
+      return { scope, sheet: 'TOK', label: groups.length ? `${scope}-${groups[0].trim()}` : `${scope} TOK ${ev.classes.join('+')}` };
+    }
+    return { scope, sheet: tdSubjectLabel(subject), label: groups.length ? groups[0].trim() : subject };
+  }
+  const myp = byLesson.get(ev.lessonId);
+  return myp ? { scope: 'MYP', sheet: tdSubjectLabel(subject), label: myp.name } : null;
+}
+// Toddle spells the DP sections differently from aSc ("Chemistry MX.1" against "Chem MX.1"),
+// so after an exact and a punctuation-blind comparison, allow aSc's to be an abbreviation of
+// Toddle's — every letter in order, nothing invented. Scoping to the block or IB group first
+// and demanding a single survivor is what keeps that safe; two candidates means no match.
+const tdNorm = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+function tdIsAbbrev(short, long) {
+  if (short.length < 4 || short.length >= long.length) return false;
+  let i = 0;
+  for (const ch of long) if (ch === short[i] && ++i === short.length) return true;
+  return false;
+}
+// The classes that could possibly be this one. A block or an IB group is a real partition, so
+// a loose comparison inside it is safe; anything else is a catch-all where it is not.
+function tdPool(target, tpl) {
+  const all = Array.from(tpl.classes.keys());
+  if (target.scope === 'DP1' && /^Block [A-F]$/.test(target.sheet)) {
+    return { pool: all.filter(name => name.endsWith(` - ${target.sheet}`)), partitioned: true };
+  }
+  if (target.scope === 'DP2' && /^Group \d$/.test(target.sheet)) {
+    const n = target.sheet.slice(6);
+    // A section shared between two IB groups is written "G3+4.", so read the leading numbers
+    // as a list rather than a single digit.
+    return { pool: all.filter(name => {
+      const head = /^G([\d+]+)\./.exec(name);
+      return head && head[1].split('+').includes(n) && /DP2$/.test(name);
+    }), partitioned: true };
+  }
+  if (target.scope === 'DP1' || target.scope === 'DP2') {
+    return { pool: all.filter(name => name.includes(target.scope)), partitioned: false };
+  }
+  return { pool: [], partitioned: false };     // MYP matches by exact name only
+}
+function tdResolve(target, tpl) {
+  if (tpl.classes.has(target.label)) return target.label;
+  const { pool, partitioned } = tdPool(target, tpl);
+  const wanted = tdNorm(target.label);
+  const exact = pool.filter(name => tdNorm(name) === wanted);
+  if (exact.length === 1) return exact[0];
+  // Abbreviation matching only inside a real partition, and only for a name long enough to be
+  // distinctive. Without both guards a short subject like "Core" is a subsequence of half the
+  // list and would silently attach itself to whichever one it hit. Length is deliberately not
+  // capped: Toddle writes DP2 out in full, so "G1. Lit&Perf SL" has to reach
+  // "G1.Literature and Performance.SL". A single survivor is what makes that safe.
+  if (!partitioned || wanted.length < 5) return null;
+  const abbrev = pool.filter(name => tdIsAbbrev(wanted, tdNorm(name)));
+  return abbrev.length === 1 ? abbrev[0] : null;
+}
 function buildToddleExport() {
   if (!TD.template) throw new Error('Load the Toddle template first.');
   if (activeSourceKey !== 'secondary') throw new Error('Switch the source to Secondary: this template covers MYP Grades 6-10.');
@@ -4358,8 +4448,8 @@ function buildToddleExport() {
     || naturalKey(a.period).localeCompare(naturalKey(b.period))
     || naturalKey(a.cells[1]).localeCompare(naturalKey(b.cells[1])));
   for (const ev of DATA.events) {
-    const cls = byLesson.get(ev.lessonId);
-    if (!cls) continue;                        // DP, CP and meetings carry no MYP class name
+    const target = tdTarget(ev, byLesson);
+    if (!target) continue;                     // meetings and anything with no class at all
     if (tpl.periods.size && !tpl.periods.has(String(ev.period))) {
       unknownPeriods.set(String(ev.period), (unknownPeriods.get(String(ev.period)) || 0) + 1);
       continue;
@@ -4379,35 +4469,57 @@ function buildToddleExport() {
       staffNeeds.get(teacher).confirmed = confirmed;
     }
     const [start, end] = String(ev.time || '').split(/[–—-]/).map(s => s.trim());
-    const classId = tpl.classes.get(cls.name);
-    const known = classId !== undefined;
+    const resolved = tdResolve(target, tpl);
+    const name = resolved || target.label;
     const entry = {
       week: ev.weekShort || 'All',
-      subject: tdSubjectLabel(ev.subject),
+      scope: target.scope,
+      subject: target.sheet,
       day: ev.day,
       period: String(ev.period),
-      cells: [known ? classId : '', cls.name, String(ev.period), ev.day, emails.join(', '),
-              uniq(ev.rooms).join(', '), tdSubjectLabel(ev.subject), start || '', end || '']
+      cells: [resolved ? tpl.classes.get(resolved) : '', name, String(ev.period), ev.day, emails.join(', '),
+              uniq(ev.rooms).join(', '),
+              // tdSubjectLabel exists to merge Arabic A and B onto one MYP sheet; for DP it
+              // would eat the block letter, so the aSc subject goes through untouched.
+              target.scope === 'MYP' ? tdSubjectLabel(ev.subject) : String(ev.subject || '').trim(),
+              start || '', end || '']
     };
-    if (known) rows.push(entry);
+    if (resolved) rows.push(entry);
     else {
       orphanRows.push(entry);
-      unknownClasses.set(cls.name, (unknownClasses.get(cls.name) || 0) + 1);
+      unknownClasses.set(`${target.scope} · ${target.label}`, (unknownClasses.get(`${target.scope} · ${target.label}`) || 0) + 1);
     }
   }
   sortRows(rows);
   sortRows(orphanRows);
   const weekTally = { All: 0, A: 0, B: 0 };
   for (const r of rows) weekTally[r.week] = (weekTally[r.week] || 0) + 1;
-  notes.push(`${rows.length} rows built from ${named.rows.length} MYP classes, against the template's `
-    + `${tpl.classes.size} classes and ${tpl.people.length} staff. Three workbooks: Regular ${weekTally.All} rows `
-    + `(classes that run every week), Week A ${weekTally.A}, Week B ${weekTally.B}.`);
-  if (unknownClasses.size) {
-    const dropped = Array.from(unknownClasses.values()).reduce((a, b) => a + b, 0);
-    notes.push(`${unknownClasses.size} class${unknownClasses.size === 1 ? '' : 'es'} in the timetable ${
-      unknownClasses.size === 1 ? 'is' : 'are'} not in the Toddle template. Their ${dropped} row${dropped === 1 ? '' : 's'} `
-      + `${dropped === 1 ? 'is' : 'are'} kept out of the three workbooks and put in the "Not in Toddle" one instead, `
-      + `where the class names can be corrected by hand before uploading.`);
+  // Reported per programme, since each is its own set of outputs and the loaded template
+  // usually only holds one of them.
+  const scopes = ['MYP', 'DP1', 'DP2'];
+  const summary = scopes.map(s => {
+    const mine = rows.filter(r => r.scope === s);
+    const orphans = orphanRows.filter(r => r.scope === s);
+    const tally = { All: 0, A: 0, B: 0 };
+    for (const r of mine) tally[r.week] = (tally[r.week] || 0) + 1;
+    return { scope: s, matched: mine.length, orphans: orphans.length, tally,
+             classes: new Set(mine.map(r => r.cells[1])).size,
+             orphanClasses: new Set(orphans.map(r => r.cells[1])).size };
+  }).filter(s => s.matched || s.orphans);
+  notes.push(`Against the template's ${tpl.classes.size} classes and ${tpl.people.length} staff: `
+    + summary.map(s => `${s.scope} ${s.matched} rows (Regular ${s.tally.All}, Week A ${s.tally.A}, Week B ${s.tally.B})`
+        + `${s.orphans ? ` plus ${s.orphans} not in Toddle` : ''}`).join('; ')
+    + '. Pick a programme above; each gets its own set of workbooks.');
+  for (const s of summary.filter(x => x.orphanClasses)) {
+    // A programme with nothing matched is simply not in this template, which is a different
+    // thing from a handful of names having drifted.
+    notes.push(!s.matched
+      ? `${s.scope}: this template holds no ${s.scope} classes at all, so none of its ${s.orphans} rows can go out. `
+        + `Load the template Toddle generated for ${s.scope} to export it.`
+      : `${s.scope}: ${s.orphanClasses} class${s.orphanClasses === 1 ? '' : 'es'} ${
+          s.orphanClasses === 1 ? 'is' : 'are'} not in the Toddle template, holding ${s.orphans} row${s.orphans === 1 ? '' : 's'}. `
+        + `They are kept out of the three workbooks and put in the "Not in Toddle" one instead, `
+        + `where the real class names can be written in before uploading.`);
   }
   if (unknownPeriods.size) {
     notes.push(`Periods the template does not offer, so their rows were left out: `
@@ -4468,20 +4580,24 @@ function tdSheetsFrom(entries, tpl) {
 }
 // "Regular" is every class that runs the same in both weeks; Week A and Week B carry only the
 // lessons confined to that week, so the three files together are the whole timetable once.
-function tdWorkbookFor(scope) {
+function tdScope() {
+  return String(document.getElementById('tdScope')?.value || 'MYP');
+}
+function tdWorkbookFor(week, scope) {
   const res = TD.result;
   if (!res) return null;
-  const want = scope === 'Regular' ? 'All' : scope;
-  const sheets = tdSheetsFrom(res.rows.filter(r => r.week === want), res.tpl);
+  const want = week === 'Regular' ? 'All' : week;
+  const sheets = tdSheetsFrom(res.rows.filter(r => r.week === want && r.scope === scope), res.tpl);
   return sheets.length ? writeXlsx(sheets) : null;
 }
-function tdDownloadScope(scope) {
-  const blob = tdWorkbookFor(scope);
+function tdDownloadScope(week) {
+  const scope = tdScope();
+  const blob = tdWorkbookFor(week, scope);
   if (!blob) {
-    tdStatus('tdTemplateStatus', TD.result ? `No rows for ${scope}.` : 'Press "Check against template" first.', 'bad');
+    tdStatus('tdTemplateStatus', TD.result ? `No ${scope} rows for ${week}.` : 'Press "Check against template" first.', 'bad');
     return;
   }
-  downloadBlob(blob, `toddle_myp_${scope.toLowerCase().replace(/\s+/g, '_')}.xlsx`);
+  downloadBlob(blob, `toddle_${scope.toLowerCase()}_${week.toLowerCase().replace(/\s+/g, '_')}.xlsx`);
 }
 // The classes Toddle does not hold, in the same format but with Class id left empty. The
 // first sheet is a worklist for writing the real names against, since that is the manual step
@@ -4489,26 +4605,36 @@ function tdDownloadScope(scope) {
 function tdDownloadOrphans() {
   const res = TD.result;
   if (!res) { tdStatus('tdTemplateStatus', 'Press "Check against template" first.', 'bad'); return; }
-  if (!res.orphanRows.length) { tdStatus('tdTemplateStatus', 'Every class is already in Toddle.', 'ok'); return; }
-  const worklist = [['Class name in the timetable', 'Rows', 'Runs', 'Subject', 'Suggested Toddle names', 'Real class name in Toddle']];
+  const scope = tdScope();
+  const mine = res.orphanRows.filter(r => r.scope === scope);
+  if (!mine.length) { tdStatus('tdTemplateStatus', `Every ${scope} class is already in Toddle.`, 'ok'); return; }
+  const worklist = [['Class name in the timetable', 'Rows', 'Runs', 'Sheet', 'Suggested Toddle names', 'Real class name in Toddle']];
   const byName = new Map();
-  for (const r of res.orphanRows) {
+  for (const r of mine) {
     if (!byName.has(r.cells[1])) byName.set(r.cells[1], { rows: 0, weeks: new Set(), subject: r.subject });
     byName.get(r.cells[1]).rows++;
     byName.get(r.cells[1]).weeks.add(r.week);
   }
   for (const [name, info] of Array.from(byName.entries()).sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])))) {
-    const stem = name.split('.').slice(0, 2).join('.');
-    const near = Array.from(res.tpl.classes.keys())
-      .filter(c => c !== name && (c.startsWith(stem) || (c.includes('.') && stem.startsWith(c.split('.').slice(0, 2).join('.')))))
-      .slice(0, 4);
     const weeks = Array.from(info.weeks).sort();
     worklist.push([name, info.rows,
       weeks.length === 1 && weeks[0] === 'All' ? 'Every week' : weeks.map(w => w === 'All' ? 'Every week' : `Week ${w}`).join(' + '),
-      info.subject, near.join(', '), '']);
+      info.subject, tdNearby(name, scope, info.subject, res.tpl).join(', '), '']);
   }
-  const sheets = [{ name: 'Names to fix', rows: worklist }, ...tdSheetsFrom(res.orphanRows, res.tpl)];
-  downloadBlob(writeXlsx(sheets), 'toddle_myp_not_in_toddle.xlsx');
+  const sheets = [{ name: 'Names to fix', rows: worklist }, ...tdSheetsFrom(mine, res.tpl)];
+  downloadBlob(writeXlsx(sheets), `toddle_${scope.toLowerCase()}_not_in_toddle.xlsx`);
+}
+// Names worth eyeballing against an unmatched one: everything Toddle holds on that sheet for
+// DP, and the same cohort-and-subject stem for MYP, where sheets are not a useful filter.
+function tdNearby(name, scope, sheet, tpl) {
+  const all = Array.from(tpl.classes.keys());
+  if (scope === 'DP1' && /^Block [A-F]$/.test(sheet)) return all.filter(c => c.endsWith(` - ${sheet}`)).slice(0, 8);
+  if (scope === 'DP2' && /^Group \d$/.test(sheet)) {
+    return all.filter(c => new RegExp(`^G(\\d\\+)?${sheet.slice(6)}[.+]`).test(c) && /DP2$/.test(c)).slice(0, 8);
+  }
+  if (scope !== 'MYP') return all.filter(c => c.includes(scope) && c !== name).slice(0, 6);
+  const stem = name.split('.').slice(0, 2).join('.');
+  return all.filter(c => c !== name && (c.startsWith(stem) || (c.includes('.') && stem.startsWith(c.split('.').slice(0, 2).join('.'))))).slice(0, 4);
 }
 function tdStatus(id, text, kind) {
   const el = document.getElementById(id);
@@ -4527,23 +4653,29 @@ function renderToddle() {
   }
   if (stats) {
     const blank = Array.from(res.staffNeeds.values()).filter(s => !s.confirmed).length;
+    const scope = tdScope();
+    const mine = res.rows.filter(r => r.scope === scope);
+    const orphans = res.orphanRows.filter(r => r.scope === scope);
+    const tally = { All: 0, A: 0, B: 0 };
+    for (const r of mine) tally[r.week] = (tally[r.week] || 0) + 1;
     stats.innerHTML = [
-      ['Regular', res.weekTally.All, 'Rows that run every week'],
-      ['Week A / Week B', `${res.weekTally.A} / ${res.weekTally.B}`, 'Rows confined to one week'],
-      ['Not in Toddle', res.unknownClasses.size, `${res.orphanRows.length} rows in their own file`],
+      [`${scope} Regular`, tally.All, 'Rows that run every week'],
+      ['Week A / Week B', `${tally.A} / ${tally.B}`, 'Rows confined to one week'],
+      ['Not in Toddle', new Set(orphans.map(r => r.cells[1])).size, `${orphans.length} rows in their own file`],
       ['Staff still blank', blank, `${res.staffNeeds.size - blank} confirmed by hand`]
     ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
   }
+  const scope = tdScope();
   if (TD.view === 'subjects') {
     const bySubject = new Map();
-    for (const r of res.rows) {
+    for (const r of res.rows.filter(r => r.scope === scope)) {
       if (!bySubject.has(r.subject)) bySubject.set(r.subject, { all: 0, A: 0, B: 0, classes: new Set() });
       const s = bySubject.get(r.subject);
       s[r.week === 'All' ? 'all' : r.week]++;
       s.classes.add(r.cells[1]);
     }
     const list = Array.from(bySubject.entries()).sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
-    table.innerHTML = `<thead><tr><th>Sheet (subject)</th><th>Classes</th><th>Regular</th><th>Week A</th><th>Week B</th></tr></thead><tbody>${
+    table.innerHTML = `<thead><tr><th>Sheet</th><th>Classes</th><th>Regular</th><th>Week A</th><th>Week B</th></tr></thead><tbody>${
       list.map(([subject, s]) => `<tr>
         <td class="cn-name">${esc(subject)}</td>
         <td>${esc(s.classes.size)}</td>
@@ -4551,20 +4683,20 @@ function renderToddle() {
         <td>${esc(s.A)}</td><td>${esc(s.B)}</td>
       </tr>`).join('')}</tbody>`;
   } else if (TD.view === 'unknown') {
-    const list = Array.from(res.unknownClasses.entries()).sort((a, b) => b[1] - a[1] || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+    const byName = new Map();
+    for (const r of res.orphanRows.filter(r => r.scope === scope)) {
+      if (!byName.has(r.cells[1])) byName.set(r.cells[1], { rows: 0, sheet: r.subject });
+      byName.get(r.cells[1]).rows++;
+    }
+    const list = Array.from(byName.entries()).sort((a, b) => b[1].rows - a[1].rows || naturalKey(a[0]).localeCompare(naturalKey(b[0])));
     table.innerHTML = list.length
-      ? `<thead><tr><th>Class name in the timetable</th><th>Rows left out</th><th>Closest names in Toddle</th></tr></thead><tbody>${
-        list.map(([name, n]) => {
-          // Offer the nearest Toddle names so the mismatch can be settled by eye. Matching on
-          // the cohort-and-subject stem keeps out the bare homeroom, which prefixes everything.
-          const stem = name.split('.').slice(0, 2).join('.');
-          const near = Array.from(res.tpl.classes.keys())
-            .filter(c => c !== name && (c.startsWith(stem) || (c.includes('.') && stem.startsWith(c.split('.').slice(0, 2).join('.')))))
-            .slice(0, 4);
-          return `<tr><td class="cn-name">${esc(name)}</td><td>${esc(n)}</td>
+      ? `<thead><tr><th>Class name in the timetable</th><th>Sheet</th><th>Rows left out</th><th>Names Toddle has here</th></tr></thead><tbody>${
+        list.map(([name, info]) => {
+          const near = tdNearby(name, scope, info.sheet, res.tpl);
+          return `<tr><td class="cn-name">${esc(name)}</td><td class="cn-muted">${esc(info.sheet)}</td><td>${esc(info.rows)}</td>
             <td class="cn-muted">${near.length ? near.map(c => `<span class="sl-chip">${esc(c)}</span>`).join('') : 'nothing similar'}</td></tr>`;
         }).join('')}</tbody>`
-      : '<tbody><tr><td class="allocation-empty">Every class in the timetable exists in Toddle.</td></tr></tbody>';
+      : `<tbody><tr><td class="allocation-empty">Every ${esc(scope)} class in the timetable exists in Toddle.</td></tr></tbody>`;
   } else {
     // Unconfirmed first, since those are the ones still going out blank. Confirmed rows stay
     // on the list so a wrong call can be taken back.
@@ -4612,6 +4744,7 @@ document.getElementById('tdRegular')?.addEventListener('click', () => tdDownload
 document.getElementById('tdWeekA')?.addEventListener('click', () => tdDownloadScope('A'));
 document.getElementById('tdWeekB')?.addEventListener('click', () => tdDownloadScope('B'));
 document.getElementById('tdOrphans')?.addEventListener('click', tdDownloadOrphans);
+document.getElementById('tdScope')?.addEventListener('change', renderToddle);
 document.getElementById('tdTable')?.addEventListener('change', event => {
   const sel = event.target.closest('.td-confirm');
   if (!sel) return;
