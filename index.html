@@ -498,6 +498,7 @@
     <button class="tab-btn tab-btn--utility" data-section="classNamesSection" aria-selected="false" title="Generate canonical class names for Secondary MYP">Class names</button>
     <button class="tab-btn tab-btn--utility" data-section="setListsSection" aria-selected="false" title="Build iSAMS class set lists from student spreadsheets">Set lists</button>
     <button class="tab-btn tab-btn--utility" data-section="dpSetsSection" aria-selected="false" title="Build iSAMS DP1 set lists from the DP choices workbook">DP set lists</button>
+    <button class="tab-btn tab-btn--utility" data-section="primarySetsSection" data-primary-only="true" aria-selected="false" title="Build Primary class lists for Arabic, Islamic and UAESS">Primary set lists</button>
     <button class="tab-btn tab-btn--utility" data-section="toddleSection" aria-selected="false" title="Write the MYP timetable into Toddle's import template">Toddle export</button>
   </nav>
 
@@ -866,6 +867,56 @@
         <table id="dpTable" class="allocation-table cn-table" aria-label="DP set lists"></table>
       </section>
       <div id="dpNotes"></div>
+    </div>
+  </section>
+
+  <section id="primarySetsSection" class="page-section" data-primary-only="true" aria-label="Primary set lists">
+    <div class="allocation-panel">
+      <h2>Primary set lists</h2>
+      <p><strong>Primary only &mdash; Grades 1&ndash;5, EY1, EY2 and Minis.</strong> Builds class lists
+        for the three subjects the PYP timetable splits a homeroom on:
+        <strong>Arabic A/B</strong>, <strong>Islamic A/B</strong> and <strong>UAESS</strong>
+        (Social Studies, which the timetable runs for the Arabic A cohort only). The sets
+        themselves come from the loaded Primary XML, so the groupings are always whatever aSc
+        currently says; the spreadsheet only decides which student goes in which one. Join key
+        is <strong>Form</strong> against the aSc class, and <strong>School Id</strong> identifies
+        the student. Everything is read in the browser and never uploaded or committed.</p>
+      <p class="cn-muted">The export is one workbook with <strong>a tab per year group</strong>, each
+        holding that year's class lists stacked one under another with the class name above each
+        table. It is written to be read and printed, not imported. Tick sets to export only
+        those; tick none and every class list goes in.</p>
+      <div class="sl-files">
+        <div>
+          <label for="psExport">PYP class list export <span class="cn-muted">(required)</span></label>
+          <input type="file" id="psExport" accept=".xlsx">
+          <div class="sl-status" id="psExportStatus">Not loaded</div>
+        </div>
+        <div>
+          <label>Build</label>
+          <div class="button-row">
+            <button id="psBuild" class="primary" type="button">Build set lists</button>
+          </div>
+        </div>
+      </div>
+      <section class="summary" id="psStats"></section>
+      <div class="sl-tabs">
+        <button class="ps-tab" data-view="sets" aria-selected="true" type="button">Sets</button>
+        <button class="ps-tab" data-view="gaps" aria-selected="false" type="button">Gaps</button>
+        <button class="ps-tab" data-view="students" aria-selected="false" type="button">Students</button>
+      </div>
+      <div class="sl-picker">
+        <input type="search" id="psSearch" placeholder="Filter by set, student, form, teacher&hellip;">
+        <div class="button-row">
+          <button id="psPickShown" type="button">Select shown</button>
+          <button id="psPickNone" type="button">Clear</button>
+          <button id="psSheetExport" class="primary" type="button">Export class lists by year group</button>
+        </div>
+        <span class="print-count" id="psPickCount"></span>
+      </div>
+      <section class="table-wrap allocation-wrap">
+        <table id="psTable" class="allocation-table cn-table" aria-label="Primary set lists"></table>
+      </section>
+      <div id="psNotes"></div>
     </div>
   </section>
 
@@ -3389,10 +3440,14 @@ function matchStudentByName(name, candidates) {
 // roster always produces the same groups and rebuilding never reshuffles a class.
 // Groups may start pre-loaded with students pinned there by hand; the rest are dealt around
 // them so the pins do not unbalance the result.
-function splitRoster(list, n, seed) {
+// `stratumOf` names the property being kept even: gender and home form by default, but the
+// Primary export carries no Gender column, so that builder passes home form alone rather
+// than letting an absent field silently collapse every student into one stratum.
+const rosterStratumGenderForm = s => `${/^m/i.test(s.gender) ? 'M' : 'F'}|${s.form}`;
+function splitRoster(list, n, seed, stratumOf = rosterStratumGenderForm) {
   const strata = new Map();
   for (const s of list) {
-    const key = `${/^m/i.test(s.gender) ? 'M' : 'F'}|${s.form}`;
+    const key = stratumOf(s);
     if (!strata.has(key)) strata.set(key, []);
     strata.get(key).push(s);
   }
@@ -4305,6 +4360,537 @@ document.querySelectorAll('.dp-tab').forEach(btn => btn.addEventListener('click'
   DP.view = btn.dataset.view;
   document.querySelectorAll('.dp-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
   renderDpSets();
+}));
+
+// --- Primary set lists ------------------------------------------------------
+// Primary splits a homeroom three different ways, and each split has a different shape in
+// aSc, so the sets are read straight out of the loaded XML rather than generated from a
+// naming rule:
+//   Arabic A/B   parallel bands across a whole year group (Grade 1 runs A1-A3 and B1-B4),
+//                so which band a student sits in is a roster decision and is balanced here.
+//   Islamic A/B  fixed clusters of homerooms, so the set follows from the student's Form.
+//   UAESS        the same, and taught to the Arabic A cohort only.
+// Minis take Arabic as an entire class with no A/B split and have no Islamic lessons at
+// all, which is why their sets carry no track letter.
+const PS = { export: null, result: null, view: 'sets',
+             manual: new Map(),      // School Id -> set code chosen by hand in the Gaps view
+             selected: new Set() };  // set codes ticked for spreadsheet export
+const PS_COLS = {
+  // The join-critical columns; a missing one is a hard error because nothing can be built
+  // without it.
+  required: { fullName: [/^full\s*name$/i], form: [/^form$/i], year: [/^year\s*code$/i],
+              schoolId: [/^school\s*id$/i], arabic: [/^arabic\s*a\/?b$/i], islamic: [/^islamic$/i] },
+  // Carried through to the exports only, so a sheet without them still builds.
+  optional: { schoolCode: [/^school\s*code$/i], religion: [/^religion$/i], tutor: [/^tutor$/i] }
+};
+function psColumnMap(sheet) {
+  const header = (sheet.rows[0] || []).map(h => String(h || '').trim());
+  const map = { ...PS_COLS.required };
+  for (const [key, patterns] of Object.entries(PS_COLS.optional)) {
+    if (header.some(h => patterns.some(p => p.test(h)))) map[key] = patterns;
+  }
+  return map;
+}
+function psStudents() {
+  const sheet = pickSheet(PS.export, /export/i, PS_COLS.required);
+  return sheetToObjects(sheet, psColumnMap(sheet))
+    .filter(r => r.schoolId && r.form)
+    .map(r => ({ ...r,
+      schoolCode: r.schoolCode || '', religion: r.religion || '', tutor: r.tutor || '',
+      fullName: String(r.fullName || '').trim(),
+      form: String(r.form).trim(),
+      year: String(r.year || '').trim(),
+      arabic: String(r.arabic || '').trim().toUpperCase(),
+      islamic: String(r.islamic || '').trim().toUpperCase() }));
+}
+// One key per year group, spoken the same way by both sides: the spreadsheet says "01" and
+// "Minis | Pre-K" where aSc says "1CK" and "Mini Camels KG".
+function psYearKey(value) {
+  const text = String(value || '').trim();
+  if (/^mini/i.test(text)) return 'Mini';
+  const ey = /^EY\s*(\d)/i.exec(text);
+  if (ey) return `EY${ey[1]}`;
+  const digits = /(\d{1,2})/.exec(text);
+  return digits ? String(Number(digits[1])) : text;
+}
+// The spreadsheet and aSc do not spell the EY and Mini homerooms identically: the sheet has
+// "EY1KM Arabian Wolves" where aSc has "EY1KM Arabian Wolf", and "Mini Camels" where aSc
+// has "Mini Camels KG". Every EY form carries a unique code ahead of the theme name, so
+// that code is the key; the rest match on the collapsed name and may be a prefix of one
+// another. Two candidates is reported, never guessed.
+const psFold = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+function psFormKey(name) {
+  const ey = /^\s*(EY\d[A-Za-z]*)\b/i.exec(String(name || ''));
+  return ey ? ey[1].toLowerCase() : psFold(name);
+}
+const PS_FORM_PREFIX_MIN = 6;
+function psMatchForm(form, classNames) {
+  const key = psFormKey(form);
+  const exact = classNames.filter(c => psFormKey(c) === key);
+  if (exact.length) return exact.length === 1 ? exact[0] : null;
+  const folded = psFold(form);
+  if (folded.length < PS_FORM_PREFIX_MIN) return null;
+  const near = classNames.filter(c => {
+    const other = psFold(c);
+    return other.length >= PS_FORM_PREFIX_MIN && (other.startsWith(folded) || folded.startsWith(other));
+  });
+  return near.length === 1 ? near[0] : null;
+}
+// Which of the three rules fills a given lesson. "Homeroom Arabic B" and "Homeroom Isl
+// B/NA" are pastoral cards rather than taught sets, and the anchor excludes them.
+function psCategory(subject) {
+  const s = String(subject || '');
+  if (/^Social\s*Studies/i.test(s)) return 'uaess';
+  if (/^Arabic\b/i.test(s)) return 'arabic';
+  if (/^Islamic\b/i.test(s)) return 'islamic';
+  return '';
+}
+const PS_CAT_LABEL = { arabic: 'Arabic', islamic: 'Islamic', uaess: 'UAESS' };
+// A card names its group once per class it draws on, and those names are not always
+// identical -- one Grade 2 Islamic A card says "Islamic A" for two homerooms and "Islamic
+// A1" for the third. The name most of the classes agree on wins.
+function psGroupName(ev) {
+  const tally = new Map();
+  for (const g of ev.groups || []) tally.set(g, (tally.get(g) || 0) + 1);
+  const ranked = Array.from(tally.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]));
+  return ranked.length ? ranked[0][0] : '';
+}
+// The track letter and its index come from the aSc group ("Arabic B4", "Islamic A"), which
+// is the authority here: the Islamic EY subject carries no letter of its own, and Minis
+// take Arabic as an entire class -- exactly the case that must produce no letter at all.
+// UAESS is timetabled against a group named "Arabic A", which marks the cohort rather than
+// a track, so it is deliberately given none.
+function psTrack(cat, groupName) {
+  if (cat === 'uaess') return '';
+  const m = /^(?:Arabic|Islamic)\s*([AB])(\d*)$/i.exec(String(groupName || '').trim());
+  return m ? m[1].toUpperCase() + m[2] : '';
+}
+// EY homerooms are "EY1KM Arabian Wolf" in aSc, and six of those in one code runs past 80
+// characters, so the theme name is dropped and the unique code kept. Mini homerooms have no
+// such code, so they are left whole.
+function psFormLabel(className) {
+  const ey = /^\s*(EY\d[A-Za-z]*)\b/i.exec(String(className || ''));
+  return ey ? ey[1].toUpperCase() : String(className || '').trim();
+}
+const psFirstName = t => String(t || '').trim().split(/\s+/)[0] || '';
+// Homerooms, then the teacher, then the track. UAESS is prefixed with the subject and names
+// the teacher in full: every UAESS set in the school is taught by the same person, so
+// without the prefix the codes would read as an unlabelled list of homeroom pairs.
+function psSetCode(cat, rooms, teacher, track) {
+  const list = rooms.join('.');
+  if (cat === 'uaess') return `UAESS.${list} - ${teacher || 'Unassigned'}`;
+  return `${list} - ${psFirstName(teacher) || 'Unassigned'}${track ? `.${track}` : ''}`;
+}
+// One row per taught set. A lesson repeats as several cards across the week, so cards are
+// merged on the four things that decide who is in the room: cohort, subject, group, teacher.
+function psTimetableSets() {
+  const merged = new Map();
+  for (const ev of DATA.events) {
+    const cat = psCategory(ev.subject);
+    if (!cat || !ev.classes.length) continue;
+    const groupName = psGroupName(ev);
+    const key = [ev.classes.slice().sort().join('+'), ev.subject, groupName, ev.teachers.join(',')].join('::');
+    if (!merged.has(key)) merged.set(key, { ev, cat, groupName, slots: [] });
+    merged.get(key).slots.push(`${ev.dayShort} P${ev.period}`);
+  }
+  const rows = Array.from(merged.values()).map(m => {
+    const classes = m.ev.classes.slice().sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+    const rooms = classes.map(psFormLabel);
+    const teacher = m.ev.teachers[0] || '';
+    const track = psTrack(m.cat, m.groupName);
+    return { cat: m.cat, ev: m.ev, groupName: m.groupName, track, classes, rooms, teacher,
+             teachers: m.ev.teachers, slots: uniq(m.slots),
+             year: psYearKey(classes[0]),
+             code: psSetCode(m.cat, rooms, teacher, track) };
+  });
+  rows.sort((a, b) => naturalKey(a.code).localeCompare(naturalKey(b.code)));
+  return rows;
+}
+function buildPrimarySets() {
+  const notes = [];
+  if (!DATA.events.length) throw new Error('No timetable loaded. Load the Primary XML first.');
+  const timetableSets = psTimetableSets();
+  if (!timetableSets.length) {
+    throw new Error('The loaded timetable has no Arabic, Islamic or Social Studies lessons - is this the Primary XML?');
+  }
+  // Two lessons producing one code would silently merge two rosters into one, so a repeat is
+  // numbered and reported rather than absorbed.
+  const seenCodes = new Map();
+  const collisions = [];
+  for (const row of timetableSets) {
+    const n = (seenCodes.get(row.code) || 0) + 1;
+    seenCodes.set(row.code, n);
+    if (n > 1) { collisions.push(row.code); row.code = `${row.code} (${n})`; }
+  }
+  const students = psStudents();
+  if (!students.length) throw new Error('No student rows found - check the sheet has School Id and Form columns.');
+
+  // Every form is resolved to an aSc class once, so a naming mismatch is reported as one
+  // problem with the form rather than as a mystery repeated for each of its 25 students.
+  const classNames = uniq((DATA.selectors.class || []).map(c => c.name));
+  const formToClass = new Map();
+  const unmatchedForms = [];
+  for (const form of uniq(students.map(s => s.form))) {
+    const hit = psMatchForm(form, classNames);
+    if (hit) formToClass.set(form, hit); else unmatchedForms.push(form);
+  }
+  // A track of '' takes the whole class regardless of the student's A/B, which is how the
+  // Minis' undivided Arabic lesson is meant to behave.
+  const onTrack = (row, want) => want === undefined || !row.track || row.track[0] === want;
+  const candidatesFor = (className, cat, want) => timetableSets.filter(row =>
+    row.cat === cat && row.classes.includes(className) && onTrack(row, want));
+  // What a hand assignment may offer: the same subject and the same track elsewhere in the
+  // year group. The track matters -- an Islamic B student with no set in their own cluster
+  // belongs in another cluster's Islamic B, never in its Islamic A.
+  const inYear = (year, cat, want) => timetableSets.filter(row =>
+    row.cat === cat && row.year === year && onTrack(row, want));
+
+  const keyOf = s => String(s.schoolId);
+  const assignments = new Map();
+  const gaps = [];
+  const pending = [];
+  const manualHolders = new Map();   // set code -> students pinned there by hand
+  const unavailable = new Map();
+  let islamicNone = 0;
+
+  for (const s of students) {
+    const own = new Set();
+    assignments.set(keyOf(s), own);
+    const year = psYearKey(s.year);
+    const className = formToClass.get(s.form);
+    if (!className) {
+      gaps.push({ student: s, reason: `Form "${s.form}" matches no class in the Primary XML`, candidates: [] });
+      continue;
+    }
+    const manualCode = PS.manual.get(keyOf(s));
+    const manualSet = manualCode ? timetableSets.find(row => row.code === manualCode) : null;
+
+    const rules = [];
+    if (s.arabic === 'A' || s.arabic === 'B') rules.push(['arabic', s.arabic]);
+    else gaps.push({ student: s, reason: `Arabic A/B is "${s.arabic || 'blank'}", so no Arabic set can be chosen`,
+                     candidates: inYear(year, 'arabic').map(row => row.code) });
+    if (s.islamic === 'A' || s.islamic === 'B') rules.push(['islamic', s.islamic]);
+    else islamicNone++;
+    if (s.arabic === 'A') rules.push(['uaess', undefined]);
+
+    for (const [cat, want] of rules) {
+      const label = `${PS_CAT_LABEL[cat]}${want ? ` ${want}` : ''}`;
+      if (manualSet && manualSet.cat === cat) {
+        own.add(manualSet.code);
+        if (!manualHolders.has(manualSet.code)) manualHolders.set(manualSet.code, []);
+        manualHolders.get(manualSet.code).push(s);
+        // The row stays listed and still editable, otherwise a choice could never be revised
+        // once made - which is exactly what balancing a class by hand needs.
+        gaps.push({ student: s, resolved: true, reason: `${label} assigned by hand`,
+                    candidates: inYear(year, cat, want).map(row => row.code) });
+        continue;
+      }
+      const options = candidatesFor(className, cat, want);
+      if (!options.length) {
+        const scope = `${psYearLabel(year)} ${label}`;
+        unavailable.set(scope, (unavailable.get(scope) || 0) + 1);
+        // Two very different situations wear the same symptom. A year group that does not
+        // run the subject at all -- EY and the Minis have no UAESS, the Minis no Islamic --
+        // is one fact about the timetable, and listing it once per student would bury the
+        // case that actually needs a decision: the subject IS taught in this year, but no
+        // set reaches this homeroom. Only the second becomes a per-student gap.
+        const elsewhere = inYear(year, cat, want);
+        if (elsewhere.length) {
+          gaps.push({ student: s, reason: `No ${label} set covers ${s.form}`,
+                      candidates: elsewhere.map(row => row.code) });
+        }
+        continue;
+      }
+      if (options.length === 1) own.add(options[0].code);
+      else pending.push({ student: s, cat, options });
+    }
+  }
+  // Parallel bands: deal students across the groups so they come out even, stratified by
+  // home form so halving a year's Arabic B cannot leave one band mostly 1CK. Ordering
+  // inside a stratum is by School Id, so rebuilding never reshuffles a class.
+  const families = new Map();
+  for (const p of pending) {
+    const id = p.options.map(o => o.code).join('|');
+    if (!families.has(id)) families.set(id, { options: p.options, cat: p.cat, members: [] });
+    families.get(id).members.push(p.student);
+  }
+  const balanceReport = [];
+  for (const fam of families.values()) {
+    const n = fam.options.length;
+    // Students pinned to one of these bands by hand hold their place, and the rest are dealt
+    // around them so the pin does not unbalance the result.
+    const seed = fam.options.map(o => (manualHolders.get(o.code) || []).slice());
+    const groups = splitRoster(fam.members, n, seed, s => String(s.form));
+    groups.forEach((group, i) => {
+      for (const s of group) assignments.get(keyOf(s)).add(fam.options[i].code);
+    });
+    balanceReport.push(fam.options.map((o, i) => `${o.code} (${groups[i].length})`).join(', '));
+  }
+  // Empty sets are listed too: a band with nobody in it is a question about the timetable,
+  // and hiding it would make it look like the export simply had fewer sets.
+  const sets = new Map(timetableSets.map(row => [row.code, []]));
+  const setByCode = new Map(timetableSets.map(row => [row.code, row]));
+  for (const s of students) {
+    for (const code of assignments.get(keyOf(s)) || []) {
+      if (sets.has(code)) sets.get(code).push(s);
+    }
+  }
+  for (const list of sets.values()) {
+    list.sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
+  }
+
+  const byYear = new Map();
+  for (const s of students) {
+    const y = psYearKey(s.year);
+    byYear.set(y, (byYear.get(y) || 0) + 1);
+  }
+  notes.push(`Roster: ${students.length} students across ${byYear.size} year groups - `
+    + Array.from(byYear.entries()).sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])))
+        .map(([y, n]) => `${y}: ${n}`).join(', ')
+    + `. Sets come from the loaded Primary XML (${timetableSets.length} taught sets), so changing the timetable changes them.`);
+  if (islamicNone) {
+    notes.push(`${islamicNone} students are Islamic "N/A" or blank and receive no Islamic set. `
+      + `The timetable defines "N/A" groups but attaches no lesson to them, so there is nothing to place them in - they stay with their homeroom.`);
+  }
+  if (balanceReport.length) {
+    notes.push(`Balanced across parallel bands, evenly and by home form: ${balanceReport.join('; ')}.`);
+  }
+  if (unmatchedForms.length) {
+    notes.push(`${unmatchedForms.length} form${unmatchedForms.length === 1 ? '' : 's'} in the spreadsheet `
+      + `match no class in the Primary XML, so those students received no sets at all: ${unmatchedForms.join(', ')}. `
+      + `Check the form name against the aSc class list.`);
+  }
+  if (unavailable.size) {
+    notes.push('The rule applies but the timetable offers no set for: '
+      + Array.from(unavailable.entries()).sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `${k} (${n} student${n === 1 ? '' : 's'})`).join(', ')
+      + '. Where the year group runs no such set at all, that is the timetable speaking and the students are simply left without one. '
+      + 'Where the year group does run the subject but no set reaches that homeroom, the student is listed on the Gaps tab and can be placed in a neighbouring cluster by hand.');
+  }
+  if (collisions.length) {
+    notes.push(`${collisions.length} set code${collisions.length === 1 ? ' was' : 's were'} produced twice by different lessons and ${collisions.length === 1 ? 'has' : 'have'} been numbered to keep the rosters apart: `
+      + uniq(collisions).join(', ') + '.');
+  }
+  const empty = Array.from(sets.entries()).filter(([, list]) => !list.length).map(([code]) => code);
+  if (empty.length) {
+    notes.push(`${empty.length} set${empty.length === 1 ? ' is' : 's are'} empty - the timetable runs them but nobody in the spreadsheet qualifies: `
+      + empty.slice(0, 8).join(', ') + (empty.length > 8 ? '...' : '') + '.');
+  }
+  const oversized = Array.from(sets.entries()).filter(([, list]) => list.length > 30)
+    .sort((a, b) => b[1].length - a[1].length);
+  if (oversized.length) {
+    notes.push(`${oversized.length} set${oversized.length === 1 ? '' : 's'} over 30 students: `
+      + oversized.slice(0, 8).map(([code, list]) => `${code} (${list.length})`).join(', ')
+      + (oversized.length > 8 ? '...' : '') + '. The timetable may need another parallel group.');
+  }
+  return { students, assignments, sets, setByCode, timetableSets, gaps, notes, keyOf };
+}
+function psStatus(id, text, kind) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; el.className = `sl-status ${kind || ''}`; }
+}
+function psUpdatePickCount() {
+  const el = document.getElementById('psPickCount');
+  if (el) el.innerHTML = `<span><strong>${esc(PS.selected.size)}</strong> set${PS.selected.size === 1 ? '' : 's'} selected</span>`;
+}
+function renderPrimarySets() {
+  const table = document.getElementById('psTable');
+  const stats = document.getElementById('psStats');
+  const notes = document.getElementById('psNotes');
+  if (!table) return;
+  const res = PS.result;
+  if (!res) {
+    table.innerHTML = '<tbody><tr><td class="allocation-empty">Load the PYP class list export and press <strong>Build set lists</strong>.</td></tr></tbody>';
+    if (stats) stats.innerHTML = '';
+    if (notes) notes.innerHTML = '';
+    psUpdatePickCount();
+    return;
+  }
+  const q = String(document.getElementById('psSearch')?.value || '').trim().toLowerCase();
+  const withGaps = new Set(res.gaps.filter(g => !g.resolved).map(g => res.keyOf(g.student)));
+  if (stats) {
+    const filled = Array.from(res.sets.values()).filter(list => list.length).length;
+    stats.innerHTML = [
+      ['Students', res.students.length, 'Primary, all year groups'],
+      ['Sets', `${filled}/${res.sets.size}`, 'Filled of those the XML runs'],
+      ['Students with gaps', withGaps.size, 'Missing a set their rule calls for'],
+      ['Placements', Array.from(res.assignments.values()).reduce((t, s) => t + s.size, 0), 'Student-to-set rows']
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (PS.view === 'sets') {
+    const rows = Array.from(res.sets.entries())
+      .filter(([code, list]) => {
+        if (!q) return true;
+        const row = res.setByCode.get(code);
+        return code.toLowerCase().includes(q)
+          || String(row ? row.teachers.join(' ') : '').toLowerCase().includes(q)
+          || String(row && row.ev ? row.ev.subject : '').toLowerCase().includes(q)
+          || list.some(s => String(s.fullName).toLowerCase().includes(q));
+      })
+      .sort((a, b) => naturalKey(a[0]).localeCompare(naturalKey(b[0])));
+    table.innerHTML = `<thead><tr><th style="width:34px"></th><th>Set code</th><th>Subject</th><th>Students</th><th>Homerooms</th><th>Teacher</th><th>Names</th></tr></thead><tbody>${
+      rows.map(([code, list]) => {
+        const row = res.setByCode.get(code) || {};
+        return `<tr${list.length ? '' : ' class="sl-big"'}>
+        <td><input type="checkbox" class="ps-pick" data-code="${esc(code)}"${PS.selected.has(code) ? ' checked' : ''}></td>
+        <td class="cn-name">${esc(code)}</td>
+        <td class="cn-muted">${esc(row.ev ? row.ev.subject : '')}${row.groupName ? ` &middot; ${esc(row.groupName)}` : ''}</td>
+        <td><div class="allocation-hours">${esc(list.length)}</div></td>
+        <td>${esc((row.classes || []).join(', '))}</td>
+        <td>${esc((row.teachers || []).join(', ') || 'Unassigned')}</td>
+        <td class="cn-muted">${list.slice(0, 5).map(s => `<span class="sl-chip">${esc(s.fullName)}</span>`).join('')}${
+          list.length > 5 ? `<span class="sl-chip warn">+${esc(list.length - 5)}</span>` : ''}</td>
+      </tr>`; }).join('')}</tbody>`;
+  } else if (PS.view === 'gaps') {
+    const rows = res.gaps
+      .filter(g => !q || String(g.student.fullName).toLowerCase().includes(q)
+        || String(g.student.form).toLowerCase().includes(q) || g.reason.toLowerCase().includes(q))
+      .sort((a, b) => (a.resolved === b.resolved ? 0 : a.resolved ? 1 : -1)
+        || String(a.student.fullName).localeCompare(String(b.student.fullName)));
+    // Each candidate carries its current size, so a choice can be made with class balance in
+    // view rather than blind.
+    const sizeOf = code => (res.sets.get(code) || []).length;
+    table.innerHTML = rows.length
+      ? `<thead><tr><th>Student</th><th>Form</th><th>Year</th><th>Ar/Isl</th><th>What is missing</th><th>Assign to</th></tr></thead><tbody>${
+        rows.map(g => {
+          const key = res.keyOf(g.student);
+          const chosen = PS.manual.get(key) || '';
+          const options = (g.candidates || []).slice()
+            .sort((a, b) => sizeOf(a) - sizeOf(b) || naturalKey(a).localeCompare(naturalKey(b)));
+          return `<tr${g.resolved ? ' style="opacity:.62"' : ''}>
+            <td class="allocation-teacher">${esc(g.student.fullName)}</td>
+            <td>${esc(g.student.form)}</td><td>${esc(g.student.year)}</td>
+            <td class="cn-muted">${esc(g.student.arabic || '-')}/${esc(g.student.islamic || '-')}</td>
+            <td class="cn-muted">${g.resolved ? `<span class="sl-chip">resolved</span> ${esc(g.reason)}` : esc(g.reason)}</td>
+            <td>${options.length
+              ? `<select class="ps-assign" data-key="${esc(key)}"><option value="">&mdash; choose &mdash;</option>${
+                  options.map(c => `<option value="${esc(c)}"${c === chosen ? ' selected' : ''}>${esc(c)} &middot; ${esc(sizeOf(c))} now</option>`).join('')}</select>`
+              : '<span class="cn-muted">-</span>'}</td>
+          </tr>`;
+        }).join('')}</tbody>`
+      : '<tbody><tr><td class="allocation-empty">No gaps found.</td></tr></tbody>';
+  } else {
+    const rows = res.students.filter(s => !q || String(s.fullName).toLowerCase().includes(q)
+      || String(s.form).toLowerCase().includes(q));
+    table.innerHTML = `<thead><tr><th>Student</th><th>Form</th><th>Year</th><th>Ar/Isl</th><th>Sets</th></tr></thead><tbody>${
+      rows.map(s => {
+        const codes = Array.from(res.assignments.get(res.keyOf(s)) || [])
+          .sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+        return `<tr><td class="allocation-teacher">${esc(s.fullName)}</td><td>${esc(s.form)}</td><td>${esc(s.year)}</td>
+          <td class="cn-muted">${esc(s.arabic || '-')}/${esc(s.islamic || '-')}</td>
+          <td>${codes.map(c => `<span class="sl-chip">${esc(c)}</span>`).join('') || '<span class="cn-muted">-</span>'}</td></tr>`;
+      }).join('')}</tbody>`;
+  }
+  psUpdatePickCount();
+  if (notes) notes.innerHTML = res.notes.map(n => `<div class="cn-skipped">${esc(n)}</div>`).join('');
+}
+// One tab per year group, and within a tab one table per class list, stacked down the sheet
+// under its own heading. This is a document to read and print, not a file to import, so the
+// tables carry a title row and a blank line between them rather than one flat grid.
+const PS_LIST_COLS = ['#', 'Full Name', 'Form', 'School Id', 'Arabic A/B', 'Islamic', 'Religion'];
+function psYearSheetRows(codes, res) {
+  const rows = [];
+  for (const code of codes) {
+    const row = res.setByCode.get(code) || {};
+    const list = res.sets.get(code) || [];
+    // The class name sits on its own line above the table, with the detail that identifies
+    // the class underneath it, so a printed page says what it is without the set code having
+    // to carry every fact.
+    rows.push([code]);
+    rows.push([[row.ev ? row.ev.subject : '', (row.teachers || []).join(', '),
+                (row.classes || []).join(', '), `${list.length} student${list.length === 1 ? '' : 's'}`]
+               .filter(Boolean).join('  ·  ')]);
+    rows.push(PS_LIST_COLS);
+    list.forEach((s, i) => rows.push([
+      i + 1, s.fullName, s.form, s.schoolId, s.arabic, s.islamic, s.religion
+    ]));
+    if (!list.length) rows.push(['', 'No students in this set']);
+    rows.push([]);          // one blank line between tables
+  }
+  return rows;
+}
+// Youngest first, the way the school lists its year groups.
+const PS_YEAR_ORDER = ['Mini', 'EY1', 'EY2', '1', '2', '3', '4', '5'];
+function psYearRank(year) {
+  const at = PS_YEAR_ORDER.indexOf(year);
+  return at < 0 ? PS_YEAR_ORDER.length : at;
+}
+function psYearLabel(year) {
+  if (year === 'Mini') return 'Minis';
+  return /^EY/.test(year) ? year : `Grade ${year}`;
+}
+function psExportYearGroups() {
+  const res = PS.result;
+  if (!res) return;
+  // Ticking sets narrows the export; ticking none exports the lot, which is the usual case.
+  const picked = Array.from(PS.selected).filter(c => res.sets.has(c));
+  const codes = (picked.length ? picked : Array.from(res.sets.keys()))
+    .sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
+  const byYear = new Map();
+  for (const code of codes) {
+    const year = (res.setByCode.get(code) || {}).year || '?';
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year).push(code);
+  }
+  const years = Array.from(byYear.keys())
+    .sort((a, b) => psYearRank(a) - psYearRank(b) || naturalKey(a).localeCompare(naturalKey(b)));
+  const sheets = years.map(year => ({ name: psYearLabel(year), rows: psYearSheetRows(byYear.get(year), res) }));
+  if (!sheets.length) { psStatus('psExportStatus', 'Nothing to export - build the set lists first.', 'bad'); return; }
+  downloadBlob(writeXlsx(sheets), 'primary_class_lists.xlsx');
+  psStatus('psExportStatus', `Exported ${codes.length} class lists across ${sheets.length} year tabs`
+    + (picked.length ? ' (selected only)' : ''), 'ok');
+}
+document.getElementById('psExport')?.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const parsed = await readXlsx(file);
+    const sheet = pickSheet(parsed, /export/i, PS_COLS.required);
+    sheetToObjects(sheet, PS_COLS.required);      // validate headers up front
+    PS.export = parsed;
+    psStatus('psExportStatus', `${file.name} - ${sheet.rows.length - 1} rows`, 'ok');
+  } catch (err) {
+    PS.export = null;
+    psStatus('psExportStatus', err.message || String(err), 'bad');
+  }
+});
+document.getElementById('psBuild')?.addEventListener('click', () => {
+  if (activeSourceKey !== 'primary') { psStatus('psExportStatus', 'Switch the source to Primary first.', 'bad'); return; }
+  if (!PS.export) { psStatus('psExportStatus', 'Load the PYP class list export first.', 'bad'); return; }
+  try {
+    PS.result = buildPrimarySets();
+    psStatus('psExportStatus', `Built ${PS.result.sets.size} sets`, 'ok');
+  } catch (err) {
+    PS.result = null;
+    psStatus('psExportStatus', err.message || String(err), 'bad');
+  }
+  renderPrimarySets();
+});
+document.getElementById('psSheetExport')?.addEventListener('click', psExportYearGroups);
+document.getElementById('psSearch')?.addEventListener('input', renderPrimarySets);
+document.getElementById('psPickShown')?.addEventListener('click', () => {
+  document.querySelectorAll('#psTable .ps-pick').forEach(b => PS.selected.add(b.dataset.code));
+  renderPrimarySets();
+});
+document.getElementById('psPickNone')?.addEventListener('click', () => { PS.selected.clear(); renderPrimarySets(); });
+document.getElementById('psTable')?.addEventListener('change', event => {
+  const box = event.target.closest('.ps-pick');
+  if (box) {
+    if (box.checked) PS.selected.add(box.dataset.code); else PS.selected.delete(box.dataset.code);
+    psUpdatePickCount();
+    return;
+  }
+  const sel = event.target.closest('.ps-assign');
+  if (!sel) return;
+  if (sel.value) PS.manual.set(sel.dataset.key, sel.value); else PS.manual.delete(sel.dataset.key);
+  PS.result = buildPrimarySets();    // rebuild so counts and gaps reflect the choice
+  renderPrimarySets();
+});
+document.querySelectorAll('.ps-tab').forEach(btn => btn.addEventListener('click', () => {
+  PS.view = btn.dataset.view;
+  document.querySelectorAll('.ps-tab').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+  renderPrimarySets();
 }));
 
 // --- Toddle export --------------------------------------------------------
@@ -5492,8 +6078,10 @@ function updateSourceUi() {
   if (releaseChip) releaseChip.textContent = config.release;
   const secondaryOnly = activeSourceKey === 'secondary';
   document.querySelectorAll('[data-secondary-only="true"]').forEach(el => el.classList.toggle('hidden', !secondaryOnly));
+  document.querySelectorAll('[data-primary-only="true"]').forEach(el => el.classList.toggle('hidden', secondaryOnly));
   const activeSection = document.querySelector('.page-section.active');
   if (!secondaryOnly && activeSection?.dataset.secondaryOnly === 'true') setActiveSection('timetableSection');
+  if (secondaryOnly && activeSection?.dataset.primaryOnly === 'true') setActiveSection('timetableSection');
 }
 async function refreshAfterDataLoad(keepSelection=false) {
   updateSourceUi();
