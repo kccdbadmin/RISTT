@@ -295,6 +295,42 @@
     .sc-lesson { background:#eaf4ff; color:#2b4a72; }
     .sc-clash { background:#ffd9d9; color:#8a1f1f; font-weight:900; }
     .sc-divhead { background:#eef2f7 !important; font-weight:900; color:#14213d; text-transform:uppercase; letter-spacing:.06em; font-size:10px; }
+    /* --- Room usage: rooms down, periods across ---------------------------
+       Same skeleton as the whole-school grid (sticky first column, one cell per period),
+       so the two read alike. The extra states are about occupancy rather than lessons:
+       free, unbookable, and the double-booked cell that is the reason to look. */
+    .rm-controls { display:grid; grid-template-columns:auto auto auto auto auto 1fr; gap:12px; align-items:end; margin:14px 0; }
+    .rm-table tbody th { width:150px; }
+    .rm-table thead th:first-child { width:150px; }
+    .rm-name { font-weight:850; overflow:hidden; text-overflow:ellipsis; }
+    .rm-use { font-size:9px; font-weight:600; color:var(--muted); white-space:nowrap; }
+    .rm-busy { background:#eaf4ff; color:#2b4a72; }
+    /* A never-booked room is shaded across its whole row, so an unused space is visible
+       from the row header rather than by reading six empty cells. */
+    .rm-idle th { background:#fbfbf6; }
+    .rm-idle .rm-name { color:#8a7a45; }
+    .rm-free { color:#c3ccd8; }
+    .rm-clash { background:#ffd9d9; color:#8a1f1f; font-weight:900; }
+    /* Week mode drops the text: 30 columns of subject names are unreadable, but a filled
+       block per booked slot shows the shape of the week at a glance. */
+    .rm-table.is-week th, .rm-table.is-week td { padding:2px; font-size:9px; }
+    .rm-table.is-week { min-width:1180px; }
+    /* The shared .school-table rule sticks the second header row at 38px, sized for the
+       taller period+time header. Week mode has a short day-name row above instead, so pin
+       both to one height or the body scrolls through the gap between them. */
+    .rm-table thead tr:first-child th { height:38px; }
+    .rm-table.is-week thead tr:first-child th { height:22px; }
+    .rm-table.is-week thead tr.sc-countrow th { top:22px; }
+    .rm-daysplit { border-left:2px solid #9aa6b6 !important; }
+    .rm-dayhead { background:#eef2f7 !important; font-weight:900; color:#14213d; text-transform:uppercase; letter-spacing:.05em; font-size:10px; text-align:center; }
+    .rm-clashes { margin-top:14px; border:1px solid #f0c2c2; background:#fff5f5; border-radius:14px; padding:12px 14px; }
+    .rm-clashes h3 { margin:0 0 4px; font-size:14px; color:#8a1f1f; }
+    .rm-clashes p { margin:0 0 8px; font-size:12px; color:#6b4a4a; }
+    .rm-clash-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .rm-clash-table th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#8a1f1f; border-bottom:1px solid #f0c2c2; padding:3px 6px 3px 0; }
+    .rm-clash-table td { border-bottom:1px solid #f7dede; padding:3px 6px 3px 0; vertical-align:top; line-height:1.35; }
+    .rm-clash-where { white-space:nowrap; font-weight:800; }
+
 
     /* --- Both-divisions timeline: hour columns, cards free-floating at real times --- */
     .tl { position:relative; overflow:auto; max-height:calc(100vh - 300px); border:1px solid var(--line); border-radius:14px; background:#fff; }
@@ -491,6 +527,7 @@
     <button class="tab-btn" data-section="scheduleSection" aria-selected="false">Daily schedule</button>
     <button class="tab-btn" data-section="schoolSection" aria-selected="false">Whole school</button>
     <button class="tab-btn" data-section="allSchoolSection" aria-selected="false">Both divisions</button>
+    <button class="tab-btn" data-section="roomUsageSection" aria-selected="false" title="Which classrooms are booked, which are free, and where two lessons share a room">Room usage</button>
     <button class="tab-btn" data-section="teacherAllocationSection" aria-selected="false">Teacher allocations</button>
     <button class="tab-btn" data-section="changelogSection" data-secondary-only="true" aria-selected="false">Secondary changelog</button>
     <button class="tab-btn" data-section="keypointsSection" data-secondary-only="true" aria-selected="false">Secondary key points and assumptions</button>
@@ -717,6 +754,51 @@
         <span class="key"><i style="background:rgba(220,60,60,.16)"></i> Overlap window</span>
         <span>Columns are one hour; cards sit at their real start and end time.</span>
       </div>
+    </div>
+  </section>
+
+
+  <section id="roomUsageSection" class="page-section" aria-label="Room usage">
+    <div class="allocation-panel">
+      <h2>Room usage</h2>
+      <p>Which classrooms are booked and which sit empty, for the whole Secondary timetable
+        &mdash; MYP, CP and DP together, or one programme at a time. Rooms run down the page and
+        periods across, the same shape as the Whole school grid. <strong>Week</strong> swaps the
+        lesson names for a filled block per booked slot, so a room&rsquo;s whole week reads at a
+        glance. A room nobody books is shaded, and a slot where two lessons share a room is
+        flagged in red and listed underneath.</p>
+      <div class="rm-controls">
+        <div>
+          <label for="rmDay">Day</label>
+          <select id="rmDay"></select>
+        </div>
+        <div>
+          <label for="rmProgramme">Programme</label>
+          <select id="rmProgramme"><option value="all">All</option></select>
+        </div>
+        <div>
+          <label for="rmShow">Rooms</label>
+          <select id="rmShow">
+            <option value="all">All rooms</option>
+            <option value="used">In use only</option>
+            <option value="idle">Never used only</option>
+          </select>
+        </div>
+        <div>
+          <label for="rmSearch">Find a room</label>
+          <input type="search" id="rmSearch" placeholder="Type to filter…">
+        </div>
+        <div>
+          <label>Actions</label>
+          <div class="button-row"><button id="rmCsv" type="button">CSV</button></div>
+        </div>
+        <div class="print-count" id="rmNote"></div>
+      </div>
+      <section class="summary" id="rmStats"></section>
+      <section class="table-wrap school-wrap">
+        <table id="rmTable" class="school-table rm-table" aria-label="Room usage grid"></table>
+      </section>
+      <div id="rmClashes"></div>
     </div>
   </section>
 
@@ -1433,7 +1515,7 @@ function createEmptyData(sourceKey=activeSourceKey) {
     periods: [],
     days: [],
     events: [],
-    selectors: { class: [], teacher: [], subject: [] }
+    selectors: { class: [], teacher: [], subject: [], room: [] }
   };
 }
 
@@ -1486,6 +1568,7 @@ function countFor(events, key, id) {
   if (key === 'subject') return events.filter(e => e.subjectId === id).length;
   if (key === 'class') return events.filter(e => e.classIds.includes(id)).length;
   if (key === 'teacher') return events.filter(e => e.teacherIds.includes(id)).length;
+  if (key === 'room') return events.filter(e => e.roomIds.includes(id)).length;
   return 0;
 }
 function mapName(map, id, fields, fallbackPrefix='') {
@@ -1650,7 +1733,7 @@ function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceK
       const short = kind === 'subject' ? relabelDpBlock(rawShort) : rawShort;
       const count = countFor(events, kind, id);
       return { id, name, short, count, contractCount: count };
-    }).filter(row => row.count > 0 || kind === 'class')
+    }).filter(row => row.count > 0 || kind === 'class' || kind === 'room')
       .sort((a,b) => naturalKey(a.name).localeCompare(naturalKey(b.name)));
   }
 
@@ -1680,7 +1763,8 @@ function parseAscXml(xmlText, sourceName='uploaded XML', sourceKey=activeSourceK
     selectors: {
       class: selectorRows(classNodes, 'class'),
       teacher: selectorRows(teacherNodes, 'teacher'),
-      subject: selectorRows(subjectNodes, 'subject')
+      subject: selectorRows(subjectNodes, 'subject'),
+      room: selectorRows(classroomNodes, 'room')
     }
   };
 }
@@ -2750,6 +2834,309 @@ schoolDay?.addEventListener('change', renderSchoolGrid);
 schoolGrade?.addEventListener('change', renderSchoolGrid);
 schoolBreaksOnly?.addEventListener('change', renderSchoolGrid);
 document.getElementById('schoolCsv')?.addEventListener('click', downloadSchoolCsv);
+// --- Room usage -----------------------------------------------------------
+// The rest of the app asks who teaches what. This asks the other question: which of the
+// school's rooms are actually booked, when they are free, and where two lessons have been
+// put in the same room at the same time. Rooms come from the XML's own <classrooms> list
+// rather than from the cards, so a room nobody books still gets a row — an unused space is
+// as much of a finding as an overbooked one.
+const rmDay = document.getElementById('rmDay');
+const rmProgramme = document.getElementById('rmProgramme');
+const rmShow = document.getElementById('rmShow');
+const rmSearch = document.getElementById('rmSearch');
+const rmTable = document.getElementById('rmTable');
+const rmStats = document.getElementById('rmStats');
+const rmNote = document.getElementById('rmNote');
+const rmClashes = document.getElementById('rmClashes');
+
+// Secondary is three programmes sharing one timetable. A card belongs to every programme
+// its classes belong to, because some genuinely are shared: DP1 Block F carries the Careers
+// Program 1 cohort alongside DP1A-D, and filtering it out of either would hide a booking.
+const RM_PROGRAMME_ORDER = ['MYP', 'CP', 'DP1', 'DP2'];
+function roomProgrammes(ev) {
+  return uniq((ev.classes || []).map(name => {
+    const band = schoolBand(name);
+    return /^G(6|7|8|9|10)$/.test(band) ? 'MYP' : band;
+  }));
+}
+function rmRunsToday(period, dayKey) {
+  if (dayKey !== FRIDAY_KEY) return true;
+  const schedule = FRIDAY_SCHEDULE[activeSourceKey] || [];
+  return !schedule.length || schedule.some(row => row.ascPeriod === period.period);
+}
+function rmTimeFor(period, dayKey) {
+  const row = dayKey === FRIDAY_KEY
+    ? (FRIDAY_SCHEDULE[activeSourceKey] || []).find(item => item.ascPeriod === period.period)
+    : null;
+  return row ? row.time : `${period.starttime}–${period.endtime}`;
+}
+// Every day/period pair a room could be booked in. Friday runs fewer periods, so a flat
+// days x periods would understate every room's utilisation.
+function rmBookableSlots() {
+  let total = 0;
+  for (const day of (DATA.days || [])) {
+    for (const period of (DATA.periods || [])) if (rmRunsToday(period, day.key)) total++;
+  }
+  return total;
+}
+// Two bookings share a room quite legitimately when one runs in Week A and the other in
+// Week B, so a clash needs the week masks to actually intersect. Cards of a single lesson
+// are one booking recorded twice and never clash with themselves.
+function rmWeeksOverlap(a, b) {
+  const wa = a.weeks && a.weeks.length > 1 ? a.weeks : '11';
+  const wb = b.weeks && b.weeks.length > 1 ? b.weeks : '11';
+  return wa.split('').some((bit, i) => bit === '1' && wb[i] === '1');
+}
+function rmIsClash(arr) {
+  for (let i = 0; i < arr.length; i++) {
+    for (let j = i + 1; j < arr.length; j++) {
+      if (arr[i].lessonId !== arr[j].lessonId && rmWeeksOverlap(arr[i], arr[j])) return true;
+    }
+  }
+  return false;
+}
+function rmBuildIndex() {
+  const programme = rmProgramme?.value || 'all';
+  const slots = new Map();
+  const unroomed = [];
+  let inScope = 0;
+  for (const ev of DATA.events) {
+    if (!includesWeek(ev)) continue;
+    if (programme !== 'all' && !roomProgrammes(ev).includes(programme)) continue;
+    inScope++;
+    if (!ev.roomIds.length) { unroomed.push(ev); continue; }
+    for (const roomId of ev.roomIds) {
+      const key = `${roomId}|${ev.dayKey}|${ev.period}`;
+      if (!slots.has(key)) slots.set(key, []);
+      slots.get(key).push(ev);
+    }
+  }
+  return { slots, unroomed, inScope, programme };
+}
+function rmRoomSlotCount(roomId, slots) {
+  let n = 0;
+  for (const day of (DATA.days || [])) {
+    for (const period of (DATA.periods || [])) {
+      if (!rmRunsToday(period, day.key)) continue;
+      if ((slots.get(`${roomId}|${day.key}|${period.period}`) || []).length) n++;
+    }
+  }
+  return n;
+}
+// In DP and CP the aSc subject is only the block container, so the group is the useful
+// label; MYP cards have a real subject and no meaningful group.
+function rmEventLine(ev) {
+  const groups = uniq((ev.groups || []).filter(g => g && g !== 'Entire class'));
+  const what = groups.length ? groups.join(' / ') : (ev.subject || 'Lesson');
+  const week = ev.weekShort === 'A' || ev.weekShort === 'B' ? ` (Week ${ev.weekShort})` : '';
+  return `${what} — ${ev.classes.join(', ') || 'No class'} — ${ev.teachers.join(', ') || 'No teacher'}${week}`;
+}
+function rmCellLabel(arr) {
+  const classes = uniq(arr.flatMap(ev => ev.classes));
+  // compactList's "+3 more" is too wide for a grid cell, so overflow is a bare count here.
+  if (classes.length) return classes.length > 2 ? `${classes.slice(0, 2).join('/')} +${classes.length - 2}` : classes.join('/');
+  return uniq(arr.map(ev => ev.subjectShort || ev.subject))[0] || '—';
+}
+function rmPopulateControls() {
+  if (!rmDay || !rmProgramme) return;
+  const dayValue = rmDay.value;
+  rmDay.innerHTML = '<option value="week">Whole week</option>'
+    + (DATA.days || []).map(d => `<option value="${esc(d.key)}">${esc(d.name)}</option>`).join('');
+  if (dayValue && (dayValue === 'week' || (DATA.days || []).some(d => d.key === dayValue))) rmDay.value = dayValue;
+
+  const progValue = rmProgramme.value;
+  const counts = new Map();
+  for (const ev of DATA.events) for (const name of roomProgrammes(ev)) counts.set(name, (counts.get(name) || 0) + 1);
+  const rank = name => { const i = RM_PROGRAMME_ORDER.indexOf(name); return i < 0 ? RM_PROGRAMME_ORDER.length : i; };
+  const names = Array.from(counts.keys()).sort((a, b) => rank(a) - rank(b) || naturalKey(a).localeCompare(naturalKey(b)));
+  rmProgramme.innerHTML = `<option value="all">All programmes (${esc(DATA.events.length)} cards)</option>`
+    + names.map(n => `<option value="${esc(n)}">${esc(n)} (${esc(counts.get(n))})</option>`).join('');
+  if (progValue && names.includes(progValue)) rmProgramme.value = progValue;
+}
+// Columns are day/period pairs. A single day keeps every period so a Friday that does not
+// run one is visibly greyed rather than silently absent; the week view drops them, because
+// thirty-odd columns need every millimetre.
+function rmColumns(weekMode, dayKey) {
+  const periods = DATA.periods || [];
+  const days = weekMode ? (DATA.days || []) : (DATA.days || []).filter(d => d.key === dayKey);
+  const columns = [];
+  for (const day of days) {
+    let first = true;
+    for (const period of periods) {
+      const runs = rmRunsToday(period, day.key);
+      if (weekMode && !runs) continue;
+      columns.push({ day, period, runs, first });
+      first = false;
+    }
+  }
+  return columns;
+}
+function rmVisibleRooms(slots) {
+  const query = String(rmSearch?.value || '').trim().toLowerCase();
+  const show = rmShow?.value || 'all';
+  return (DATA.selectors.room || []).filter(room => {
+    if (query && !`${room.name} ${room.short}`.toLowerCase().includes(query)) return false;
+    if (show === 'all') return true;
+    const busy = rmRoomSlotCount(room.id, slots) > 0;
+    return show === 'used' ? busy : !busy;
+  });
+}
+function rmAllClashes(slots) {
+  const out = [];
+  for (const room of (DATA.selectors.room || [])) {
+    for (const day of (DATA.days || [])) {
+      for (const period of (DATA.periods || [])) {
+        const arr = slots.get(`${room.id}|${day.key}|${period.period}`) || [];
+        if (arr.length > 1 && rmIsClash(arr)) out.push({ room, day, period, events: arr });
+      }
+    }
+  }
+  return out;
+}
+function renderRoomUsage() {
+  if (!rmTable) return;
+  rmPopulateControls();
+  const { slots, unroomed, inScope } = rmBuildIndex();
+  const rooms = DATA.selectors.room || [];
+  const periods = DATA.periods || [];
+  if (!rooms.length || !periods.length) {
+    rmTable.innerHTML = '<tbody><tr><td class="allocation-empty">This source has no classrooms in its XML, so there is no room usage to show.</td></tr></tbody>';
+    if (rmStats) rmStats.innerHTML = '';
+    if (rmClashes) rmClashes.innerHTML = '';
+    return;
+  }
+  const dayValue = rmDay?.value || 'week';
+  const weekMode = dayValue === 'week';
+  const columns = rmColumns(weekMode, dayValue);
+  const bookable = rmBookableSlots();
+  rmTable.classList.toggle('is-week', weekMode);
+
+  let head;
+  if (weekMode) {
+    const dayCols = (DATA.days || []).map(day => ({ day, span: periods.filter(p => rmRunsToday(p, day.key)).length }))
+      .filter(entry => entry.span > 0);
+    head = `<thead><tr><th>Room</th>${dayCols.map(entry =>
+      `<th class="rm-dayhead rm-daysplit" colspan="${esc(entry.span)}">${esc(entry.day.name)}</th>`).join('')}</tr>`
+      + `<tr class="sc-countrow"><th>Period</th>${columns.map(col =>
+        `<th class="${col.first ? 'rm-daysplit' : ''}">${esc(col.period.period)}</th>`).join('')}</tr></thead>`;
+  } else {
+    // Per-period occupancy is the reason to look at a single day: it says how much of the
+    // building is committed at 7:45 versus after lunch.
+    const busyAt = columns.map(col => col.runs
+      ? rooms.filter(room => (slots.get(`${room.id}|${col.day.key}|${col.period.period}`) || []).length).length
+      : null);
+    head = `<thead><tr><th>Room</th>${columns.map(col =>
+      `<th><div class="sc-pnum">P${esc(col.period.period)}</div><div class="sc-ptime">${col.runs ? esc(rmTimeFor(col.period, col.day.key)) : '—'}</div></th>`).join('')}</tr>`
+      + `<tr class="sc-countrow"><th>Rooms busy</th>${busyAt.map(n => {
+        if (n === null) return '<th class="sc-count is-none">—</th>';
+        const share = rooms.length ? n / rooms.length : 0;
+        const cls = n === 0 ? 'is-none' : share >= 0.5 ? 'is-hot' : 'is-some';
+        return `<th class="sc-count ${cls}">${esc(n)}</th>`;
+      }).join('')}</tr></thead>`;
+  }
+
+  const visible = rmVisibleRooms(slots);
+  const body = visible.length ? visible.map(room => {
+    const weekCount = rmRoomSlotCount(room.id, slots);
+    const idle = weekCount === 0;
+    const pct = bookable ? Math.round(100 * weekCount / bookable) : 0;
+    const cells = columns.map(col => {
+      const split = col.first ? ' rm-daysplit' : '';
+      if (!col.runs) return `<td class="sc-cell sc-off${split}"></td>`;
+      const arr = slots.get(`${room.id}|${col.day.key}|${col.period.period}`) || [];
+      if (!arr.length) return `<td class="sc-cell rm-free${split}">·</td>`;
+      const clash = rmIsClash(arr);
+      const title = `${room.name} · ${col.day.name} P${col.period.period}\n${arr.map(rmEventLine).join('\n')}`;
+      const text = weekMode ? (clash ? '!' : '&#9632;') : esc(rmCellLabel(arr));
+      return `<td class="sc-cell ${clash ? 'rm-clash' : 'rm-busy'}${split}" title="${esc(title)}">${text}</td>`;
+    }).join('');
+    return `<tr class="${idle ? 'rm-idle' : ''}"><th title="${esc(room.name)}">`
+      + `<div class="rm-name">${esc(room.short || room.name)}</div>`
+      + `<div class="rm-use">${idle ? 'Never booked' : `${esc(weekCount)}/${esc(bookable)} slots · ${esc(pct)}%`}</div></th>${cells}</tr>`;
+  }).join('') : `<tr><td class="allocation-empty" colspan="${esc(columns.length + 1)}">No room matches that filter.</td></tr>`;
+
+  rmTable.innerHTML = `${head}<tbody>${body}</tbody>`;
+
+  const usedRooms = rooms.filter(room => rmRoomSlotCount(room.id, slots) > 0);
+  const idleRooms = rooms.filter(room => !usedRooms.includes(room));
+  const clashes = rmAllClashes(slots);
+  // Peak load is the single busiest slot in the week, which is what caps how many rooms the
+  // timetable actually needs at once.
+  let peak = { n: 0, label: '—' };
+  for (const day of (DATA.days || [])) {
+    for (const period of periods) {
+      if (!rmRunsToday(period, day.key)) continue;
+      const n = rooms.filter(room => (slots.get(`${room.id}|${day.key}|${period.period}`) || []).length).length;
+      if (n > peak.n) peak = { n, label: `${day.name} P${period.period}` };
+    }
+  }
+  if (rmStats) {
+    const unroomedShare = inScope ? Math.round(100 * unroomed.length / inScope) : 0;
+    rmStats.innerHTML = [
+      ['Rooms booked', `${usedRooms.length}/${rooms.length}`, `${Math.round(100 * usedRooms.length / rooms.length)}% of the room list`],
+      ['Never booked', idleRooms.length, idleRooms.length ? compactList(idleRooms.map(r => r.short || r.name), 3).join(', ') : 'Every room is used'],
+      ['Peak rooms at once', peak.n, peak.n ? peak.label : 'Nothing scheduled'],
+      ['Double-booked slots', clashes.length, clashes.length ? 'Listed below the grid' : 'No room is booked twice'],
+      ['Cards with no room', unroomed.length, `${unroomedShare}% of cards in scope carry no room`]
+    ].map(s => `<div class="stat"><b>${esc(s[1])}</b><span>${esc(s[0])}</span><span>${esc(s[2])}</span></div>`).join('');
+  }
+  if (rmClashes) {
+    rmClashes.innerHTML = clashes.length ? `<div class="rm-clashes">
+      <h3>${esc(clashes.length)} slot${clashes.length === 1 ? '' : 's'} where one room holds two lessons</h3>
+      <p>Cards of the same lesson, and lessons in opposite weeks, are not counted here. Some of
+        these may be intended &mdash; a hall split between two groups, say &mdash; so treat them as
+        things to check rather than as errors.</p>
+      <table class="rm-clash-table">
+        <thead><tr><th>When</th><th>Room</th><th>Bookings</th></tr></thead>
+        <tbody>${clashes.map(item => `<tr>
+          <td class="rm-clash-where">${esc(item.day.short || item.day.name)} P${esc(item.period.period)}</td>
+          <td class="rm-clash-where">${esc(item.room.short || item.room.name)}</td>
+          <td>${item.events.map(ev => esc(rmEventLine(ev))).join('<br>')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '';
+  }
+  if (rmNote) {
+    rmNote.innerHTML = unroomed.length
+      ? `<span><strong>${esc(unroomed.length)}</strong> card${unroomed.length === 1 ? '' : 's'} in scope carry no classroom in the XML, so they are absent from this grid and from every room's utilisation.</span>`
+      : '<span>Every card in scope carries a classroom.</span>';
+  }
+}
+function downloadRoomCsv() {
+  const { slots } = rmBuildIndex();
+  const weekMode = (rmDay?.value || 'week') === 'week';
+  const columns = rmColumns(weekMode, rmDay?.value);
+  const bookable = rmBookableSlots();
+  const rows = [['Room', 'Slots booked', 'Slots available', 'Utilisation %',
+    ...columns.map(col => `${col.day.short || col.day.name} P${col.period.period}`)]];
+  for (const room of rmVisibleRooms(slots)) {
+    const count = rmRoomSlotCount(room.id, slots);
+    rows.push([room.name, count, bookable, bookable ? Math.round(100 * count / bookable) : 0,
+      ...columns.map(col => {
+        if (!col.runs) return 'n/a';
+        const arr = slots.get(`${room.id}|${col.day.key}|${col.period.period}`) || [];
+        if (!arr.length) return '';
+        return (rmIsClash(arr) ? 'CLASH: ' : '') + arr.map(rmEventLine).join(' | ');
+      })]);
+  }
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `room_usage_${activeSourceKey}_${weekMode ? 'week' : ((DATA.days.find(d => d.key === rmDay.value) || {}).name || 'day')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+rmDay?.addEventListener('change', renderRoomUsage);
+rmProgramme?.addEventListener('change', renderRoomUsage);
+rmShow?.addEventListener('change', renderRoomUsage);
+rmSearch?.addEventListener('input', renderRoomUsage);
+document.getElementById('rmCsv')?.addEventListener('click', downloadRoomCsv);
+// The toolbar week filter feeds this grid through includesWeek, but changing it only calls
+// render(). Rebuilding on tab open picks that up, along with anything else that moved while
+// the tab was closed.
+document.querySelector('[data-section="roomUsageSection"]')?.addEventListener('click', renderRoomUsage);
+
 
 // --- Both divisions -------------------------------------------------------
 // Secondary runs six periods from 7:45, Primary ten from 8:20, so a period number means
@@ -6092,6 +6479,7 @@ async function refreshAfterDataLoad(keepSelection=false) {
   // Names are derived from the loaded export, so rebuild them when the data changes.
   if (CN_ROWS.length || cnShowOnCards) refreshClassNames();
   renderSchoolGrid();
+  renderRoomUsage();
   // Selection defaults to everything in the newly loaded source.
   resetPrintSelection();
   renderPrintList();
